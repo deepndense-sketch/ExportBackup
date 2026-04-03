@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ExportBackup</title>
+<style>
+:root {
+    --bg: #121417;
+    --panel: #1c2128;
+    --panel-soft: #252c35;
+    --line: #323b46;
+    --text: #edf2f7;
+    --muted: #98a7b8;
+    --accent: #ff8a3d;
+    --accent-strong: #ff6d1f;
+    --warning: #ffd18c;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    min-height: 100%;
+    background:
+        radial-gradient(circle at top, rgba(255, 138, 61, 0.16), transparent 30%),
+        linear-gradient(180deg, #0e1114 0%, #171c22 100%);
+    color: var(--text);
+    font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+body {
+    padding: 20px;
+}
+
+.app {
+    max-width: 800px;
+    margin: 0 auto;
+    display: grid;
+    gap: 16px;
+}
+
+.card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 20px;
+}
+
+.eyebrow {
+    margin: 0 0 10px;
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+
+h1,
+h2 {
+    margin: 0 0 10px;
+}
+
+p {
+    margin: 0;
+    line-height: 1.5;
+}
+
+.muted {
+    color: var(--muted);
+}
+
+.warning {
+    color: var(--warning);
+}
+
+.stack {
+    display: grid;
+    gap: 14px;
+}
+
+.two-column {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 16px;
+}
+
+.row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+button {
+    border: 0;
+    border-radius: 12px;
+    padding: 13px 18px;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    color: #151515;
+}
+
+button.secondary {
+    background: var(--panel-soft);
+    color: var(--text);
+    border: 1px solid var(--line);
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.path-box,
+.status-box {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px;
+    word-break: break-word;
+}
+
+.status-box {
+    min-height: 180px;
+    white-space: pre-wrap;
+}
+
+.option {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    color: var(--muted);
+}
+
+.option input {
+    margin-top: 3px;
+}
+
+.section-label {
+    color: var(--accent);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+@media (max-width: 860px) {
+    .two-column {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+<script src="js/CSInterface.js"></script>
+<script src="js/main.js"></script>
+</head>
+<body>
+<div class="app">
+    <section class="card stack">
+        <div>
+            <p class="eyebrow">Premiere Pro Extension</p>
+            <h1>ExportBackup</h1>
+            <p class="muted">Queue a backup package for the active sequence in Adobe Media Encoder.</p>
+        </div>
+    </section>
+
+    <section class="card stack">
+        <div>
+            <div class="section-label">Backup</div>
+            <h2>Queue Backup Exports</h2>
+            <p class="muted">Use this section to send the MP4 backup and optional audio exports to Adobe Media Encoder.</p>
+        </div>
+
+        <div class="row">
+            <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Export Folder</button>
+            <button id="chooseVideoPresetButton" class="secondary" onclick="chooseVideoPreset()">Choose Video Preset</button>
+            <button id="exportButton" onclick="runExport()">Start Backup Queue</button>
+        </div>
+
+        <div class="two-column">
+            <div class="stack">
+                <div>
+                    <h2>Export Destination</h2>
+                    <div class="path-box" id="exportPath">No folder selected yet.</div>
+                </div>
+
+                <div>
+                    <h2>Queued Video Preset</h2>
+                    <div class="path-box" id="videoPresetPath"></div>
+                </div>
+            </div>
+
+            <div class="stack">
+                <div>
+                    <h2>Queued Audio Presets</h2>
+                    <div class="path-box" id="audioPresetPath"></div>
+                </div>
+
+                <label class="option">
+                    <input type="checkbox" id="exportMp3Checkbox" checked>
+                    <span>Queue each audio track as a separate MP3 file.</span>
+                </label>
+
+                <label class="option">
+                    <input type="checkbox" id="exportWavCheckbox">
+                    <span>Queue each audio track as a separate WAV file.</span>
+                </label>
+            </div>
+        </div>
+
+        <p class="warning">This tool requires you to set sequence In and Out points before starting. It can clear muted tracks, but Premiere's official scripting API does not provide track solo control.</p>
+    </section>
+
+    <section class="card stack">
+        <div>
+            <h2>Status</h2>
+            <div class="status-box" id="statusBox">Waiting to start.</div>
+        </div>
+    </section>
+</div>
+</body>
+</html>

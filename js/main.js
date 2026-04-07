@@ -633,7 +633,8 @@ function saveWavPreset(nextPath) {
 }
 
 function updateAudioPresetDisplay() {
-    document.getElementById("audioPresetPath").textContent = `MP3: ${mp3PresetPath}\nWAV: ${wavPresetPath}`;
+    document.getElementById("mp3PresetPath").textContent = mp3PresetPath;
+    document.getElementById("wavPresetPath").textContent = wavPresetPath;
 }
 
 async function getActiveSequenceName() {

@@ -102,6 +102,13 @@ p {
     align-items: center;
 }
 
+.compact-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
 button {
     border: 0;
     border-radius: 12px;
@@ -117,6 +124,26 @@ button.secondary {
     background: var(--panel-soft);
     color: var(--text);
     border: 1px solid var(--line);
+}
+
+button.preset-button {
+    padding: 9px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--muted);
+    border: 1px solid var(--line);
+}
+
+button.preset-button:hover {
+    color: var(--text);
+    border-color: rgba(255, 138, 61, 0.45);
+}
+
+.button-stack {
+    display: grid;
+    gap: 10px;
 }
 
 button.update-ready {
@@ -208,12 +235,17 @@ button:disabled {
             <p class="muted">Use this section to send the MP4 backup and optional audio exports to Adobe Media Encoder.</p>
         </div>
 
-        <div class="row">
-            <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Export Folder</button>
-            <button id="chooseVideoPresetButton" class="secondary" onclick="chooseVideoPreset()">Choose Video Preset</button>
-            <button id="chooseMp3PresetButton" class="secondary" onclick="chooseMp3Preset()">Choose MP3 Preset</button>
-            <button id="chooseWavPresetButton" class="secondary" onclick="chooseWavPreset()">Choose WAV Preset</button>
-            <button id="exportButton" onclick="runExport()">Start Backup Queue</button>
+        <div class="button-stack">
+            <div class="compact-row">
+                <button id="chooseVideoPresetButton" class="preset-button" onclick="chooseVideoPreset()">Video Preset</button>
+                <button id="chooseMp3PresetButton" class="preset-button" onclick="chooseMp3Preset()">MP3 Preset</button>
+                <button id="chooseWavPresetButton" class="preset-button" onclick="chooseWavPreset()">WAV Preset</button>
+            </div>
+
+            <div class="row">
+                <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Export Folder</button>
+                <button id="exportButton" onclick="runExport()">Start Backup Queue</button>
+            </div>
         </div>
 
         <div class="two-column">

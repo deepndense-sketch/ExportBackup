@@ -49,6 +49,10 @@ body {
     padding: 20px;
 }
 
+.card.compact-card {
+    padding: 16px 18px;
+}
+
 .eyebrow {
     margin: 0 0 10px;
     font-size: 12px;
@@ -60,6 +64,15 @@ body {
 h1,
 h2 {
     margin: 0 0 10px;
+}
+
+h1 {
+    font-size: 30px;
+    line-height: 1.05;
+}
+
+h2 {
+    font-size: 21px;
 }
 
 p {
@@ -80,7 +93,7 @@ p {
     gap: 14px;
     flex-wrap: wrap;
     color: var(--muted);
-    font-size: 13px;
+    font-size: 12px;
     align-items: center;
 }
 
@@ -146,6 +159,10 @@ button.preset-button:hover {
     gap: 10px;
 }
 
+.subtle-copy {
+    font-size: 13px;
+}
+
 button.update-ready {
     background: linear-gradient(135deg, #56a7ff, #2d73ff);
     color: #f7fbff;
@@ -171,11 +188,48 @@ button:disabled {
     white-space: pre-wrap;
 }
 
+.value-grid {
+    display: grid;
+    gap: 10px;
+}
+
+.value-item {
+    display: grid;
+    gap: 4px;
+}
+
+.value-label {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.value-text {
+    font-size: 12px;
+    line-height: 1.4;
+    color: #cfd8e3;
+    word-break: break-word;
+}
+
+.inline-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.top-title {
+    display: grid;
+    gap: 6px;
+}
+
 .option {
     display: flex;
     gap: 10px;
     align-items: flex-start;
     color: var(--muted);
+    font-size: 13px;
 }
 
 .option input {
@@ -187,13 +241,18 @@ button:disabled {
     gap: 6px;
 }
 
+.field label {
+    font-size: 12px;
+    color: var(--muted);
+}
+
 .field input {
     width: 100%;
     border-radius: 12px;
     border: 1px solid var(--line);
     background: var(--panel);
     color: var(--text);
-    padding: 12px 14px;
+    padding: 10px 12px;
     font: inherit;
 }
 
@@ -216,13 +275,13 @@ button:disabled {
 </head>
 <body>
 <div class="app">
-    <section class="card stack">
-        <div>
+    <section class="card compact-card stack">
+        <div class="top-title">
             <p class="eyebrow">Premiere Pro Extension</p>
             <h1>ExportBackup</h1>
-            <p class="muted">Queue a backup package for the active sequence in Adobe Media Encoder.</p>
+            <p class="muted subtle-copy">Queue a backup package for the active sequence in Adobe Media Encoder.</p>
         </div>
-        <div class="meta-row">
+        <div class="meta-row inline-meta">
             <div>Version: <span id="versionValue">...</span></div>
             <div><button id="updateButton" class="secondary" onclick="runGithubUpdate()">Check for Updates</button></div>
         </div>
@@ -249,22 +308,22 @@ button:disabled {
         </div>
 
         <div class="two-column">
-            <div class="stack">
-                <div>
-                    <h2>Export Destination</h2>
-                    <div class="path-box" id="exportPath">No folder selected yet.</div>
+            <div class="value-grid">
+                <div class="value-item">
+                    <div class="value-label">Export Destination</div>
+                    <div class="path-box value-text" id="exportPath">No folder selected yet.</div>
                 </div>
 
-                <div>
-                    <h2>Queued Video Preset</h2>
-                    <div class="path-box" id="videoPresetPath"></div>
+                <div class="value-item">
+                    <div class="value-label">Video Preset</div>
+                    <div class="path-box value-text" id="videoPresetPath"></div>
                 </div>
             </div>
 
             <div class="stack">
-                <div>
-                    <h2>Queued Audio Presets</h2>
-                    <div class="path-box" id="audioPresetPath"></div>
+                <div class="value-item">
+                    <div class="value-label">Audio Presets</div>
+                    <div class="path-box value-text" id="audioPresetPath"></div>
                 </div>
 
                 <div class="field">
@@ -300,10 +359,10 @@ button:disabled {
         </div>
 
         <div class="two-column">
-            <div class="stack">
-                <div>
-                    <h2>Align Folder</h2>
-                    <div class="path-box" id="alignPath">No folder selected yet.</div>
+            <div class="value-grid">
+                <div class="value-item">
+                    <div class="value-label">Align Folder</div>
+                    <div class="path-box value-text" id="alignPath">No folder selected yet.</div>
                 </div>
             </div>
 

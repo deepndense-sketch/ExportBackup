@@ -1,5 +1,5 @@
 {
-  "version": "1.2.20",
+  "version": "1.2.21",
   "channel": "main",
-  "notes": "Release 1.2.20 simplifies the preset button layout and places preset controls above the export folder action."
+  "notes": "Release 1.2.21 tightens the panel layout with smaller labels, compact values, and friendlier path display."
 }

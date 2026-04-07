@@ -424,10 +424,11 @@ function ebTryAddAudioTracks(sequence, requiredAudioCount) {
             return 0;
         }
 
-        // QE DOM is unsupported, but the simpler addTracks(0) form is the most
-        // reliable way we have found to append one normal audio track at a time.
+        // QE DOM is unsupported, but this form lets us request one stereo audio
+        // track at a time after the current last audio track.
         for (var i = 0; i < missingAudioCount; i++) {
-            qeSequence.addTracks(0);
+            var afterAudioIndex = Math.max(0, ebGetTrackCount(sequence.audioTracks) - 1);
+            qeSequence.addTracks(0, 0, 1, 1, afterAudioIndex);
         }
     } catch (e) {
         return 0;

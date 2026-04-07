@@ -1,5 +1,5 @@
 {
-  "version": "1.2.11",
+  "version": "1.2.12",
   "channel": "main",
-  "notes": "Release 1.2.11 with pre-downloaded updater packages to avoid elevated network failures."
+  "notes": "Release 1.2.12 with explicit append-after-last stereo audio-track creation during alignment."
 }

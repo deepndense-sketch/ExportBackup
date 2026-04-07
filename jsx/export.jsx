@@ -348,6 +348,37 @@ function ebValidateAvailableTracks(sequence, hasVideo, audioCount, videoTrackNum
     throw new Error(lines.join("\n"));
 }
 
+function ebValidateEmptyTargetTracks(sequence, hasVideo, audioCount, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber) {
+    var issues = [];
+
+    if (hasVideo) {
+        var targetVideoTrack = sequence.videoTracks[videoTrackNumber - 1];
+        if (ebTrackHasClips(targetVideoTrack)) {
+            issues.push("V" + videoTrackNumber + " is not empty.");
+        }
+
+        if (videoAudioTrackNumber && videoAudioTrackNumber > 0) {
+            var targetVideoAudioTrack = sequence.audioTracks[videoAudioTrackNumber - 1];
+            if (ebTrackHasClips(targetVideoAudioTrack)) {
+                issues.push("A" + videoAudioTrackNumber + " is not empty.");
+            }
+        }
+    }
+
+    for (var i = 0; i < audioCount; i++) {
+        var targetAudioTrackNumber = audioStartTrackNumber + i;
+        var targetAudioTrack = sequence.audioTracks[targetAudioTrackNumber - 1];
+        if (ebTrackHasClips(targetAudioTrack)) {
+            issues.push("A" + targetAudioTrackNumber + " is not empty.");
+        }
+    }
+
+    if (issues.length > 0) {
+        issues.push("Choose empty destination tracks and try again.");
+        throw new Error(issues.join("\n"));
+    }
+}
+
 function ebCreateTimeAtZero() {
     var when = new Time();
     when.seconds = 0;
@@ -365,6 +396,14 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
     var hasVideo = !!videoPath;
 
     ebValidateAvailableTracks(
+        sequence,
+        hasVideo,
+        audioEntries.length,
+        videoTrackNumber,
+        videoAudioTrackNumber,
+        audioStartTrackNumber
+    );
+    ebValidateEmptyTargetTracks(
         sequence,
         hasVideo,
         audioEntries.length,

@@ -279,6 +279,10 @@ function getTempUpdaterLogPath() {
     return path.join(os.tmpdir(), "ExportBackup_update_log.txt");
 }
 
+function getUserCepExtensionPath() {
+    return path.join(process.env.APPDATA || "", "Adobe", "CEP", "extensions", "ExportBackup");
+}
+
 function readVersionInfo(silent) {
     try {
         const raw = fs.readFileSync(getVersionFilePath(), "utf8");
@@ -492,10 +496,10 @@ function runGithubUpdate() {
 
             const escapedScriptPath = tempUpdaterScriptPath.replace(/'/g, "''");
             const escapedZipPath = tempUpdaterZipPath.replace(/'/g, "''");
-            const systemDestination = "C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup".replace(/'/g, "''");
+            const userDestination = getUserCepExtensionPath().replace(/'/g, "''");
             const escapedResultPath = tempUpdaterResultPath.replace(/'/g, "''");
             const escapedLogPath = tempUpdaterLogPath.replace(/'/g, "''");
-            const command = `Start-Process PowerShell -Verb RunAs -ArgumentList '-NoExit','-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}','-ZipPath','${escapedZipPath}','-Destination','${systemDestination}','-ResultPath','${escapedResultPath}','-LogPath','${escapedLogPath}'`;
+            const command = `Start-Process PowerShell -Verb RunAs -ArgumentList '-NoExit','-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}','-ZipPath','${escapedZipPath}','-Destination','${userDestination}','-ResultPath','${escapedResultPath}','-LogPath','${escapedLogPath}'`;
 
             childProcess.execFile(
                 "powershell.exe",
@@ -506,7 +510,7 @@ function runGithubUpdate() {
                         return;
                     }
 
-                    setStatus("Updater launched for the CEP extensions folder.\nTarget: C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup\nAn admin PowerShell window should show copy progress and stay open if something fails.");
+                    setStatus(`Updater launched for the CEP extensions folder.\nTarget: ${getUserCepExtensionPath()}\nAn admin PowerShell window should show copy progress and stay open if something fails.`);
                     monitorUpdaterCompletion();
                 }
             );

@@ -67,7 +67,7 @@ Track deletion is also not supported reliably through Premiere's official script
 
 The intended installed location is:
 
-- `C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup`
+- `C:\Users\user\AppData\Roaming\Adobe\CEP\extensions\ExportBackup`
 
 The panel checks GitHub on load by comparing local `version.json` against:
 
@@ -79,9 +79,9 @@ When `Update From GitHub` is used, the updater script downloads:
 
 It then extracts that ZIP and mirrors the contents into the installed CEP extension folder:
 
-- `C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup`
+- `C:\Users\user\AppData\Roaming\Adobe\CEP\extensions\ExportBackup`
 
-Because that destination is under `Program Files`, Windows may prompt for administrator permission.
+Using the AppData CEP folder avoids most `Program Files` permission problems during updates.
 
 ## Release Archives
 

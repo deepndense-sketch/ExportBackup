@@ -1,6 +1,6 @@
 param(
     [string]$ZipPath = "",
-    [string]$Destination = "C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup",
+    [string]$Destination = "",
     [string]$ResultPath = "",
     [string]$LogPath = ""
 )
@@ -13,6 +13,10 @@ if (-not $LogPath -or -not $LogPath.Trim()) {
 
 if (-not $ResultPath -or -not $ResultPath.Trim()) {
     $ResultPath = Join-Path $env:TEMP "ExportBackup_update_result.json"
+}
+
+if (-not $Destination -or -not $Destination.Trim()) {
+    $Destination = Join-Path $env:APPDATA "Adobe\CEP\extensions\ExportBackup"
 }
 
 function Write-Step($message) {

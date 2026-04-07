@@ -1,5 +1,5 @@
 {
-  "version": "1.2.13",
+  "version": "1.2.14",
   "channel": "main",
-  "notes": "Release 1.2.13 removing automatic audio-track creation during alignment."
+  "notes": "Release 1.2.14 moving installs and updates to the user AppData CEP extensions folder."
 }

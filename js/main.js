@@ -5,10 +5,9 @@ const path = require("path");
 const childProcess = require("child_process");
 const https = require("https");
 
-const DEFAULT_VIDEO_PRESET_PATH = "D:\\Work\\Tools\\ExportBackup\\presets\\1080 AIR.epr";
-const MP3_PRESET_PATH = "D:\\Work\\Tools\\ExportBackup\\presets\\mp3.epr";
-const WAV_PRESET_PATH = "C:\\Program Files\\Adobe\\Adobe Media Encoder 2026\\MediaIO\\systempresets\\3F3F3F3F_57415645\\Waveform Audio 48kHz 16-bit.epr";
 const VIDEO_PRESET_STORAGE_KEY = "exportbackup.videoPresetPath";
+const MP3_PRESET_STORAGE_KEY = "exportbackup.mp3PresetPath";
+const WAV_PRESET_STORAGE_KEY = "exportbackup.wavPresetPath";
 const EXPORT_FOLDER_STORAGE_KEY = "exportbackup.exportFolder";
 const ALIGN_FOLDER_STORAGE_KEY = "exportbackup.alignFolder";
 const DEFAULT_ALIGN_VIDEO_TRACK = 5;
@@ -19,7 +18,9 @@ let exportFolder = null;
 let alignFolder = null;
 let hostLoaded = false;
 let busy = false;
-let videoPresetPath = DEFAULT_VIDEO_PRESET_PATH;
+let videoPresetPath = "";
+let mp3PresetPath = "";
+let wavPresetPath = "";
 let localVersion = "unknown";
 let remoteVersion = null;
 
@@ -39,6 +40,22 @@ function getUpdateScriptPath() {
     return path.join(getExtensionRootPath(), "update_from_github.ps1");
 }
 
+function getBundledPresetPath(fileName) {
+    return path.join(getExtensionRootPath(), "presets", fileName);
+}
+
+function getDefaultVideoPresetPath() {
+    return getBundledPresetPath("1080 AIR.epr");
+}
+
+function getDefaultMp3PresetPath() {
+    return getBundledPresetPath("mp3.epr");
+}
+
+function getDefaultWavPresetPath() {
+    return getBundledPresetPath("wav.epr");
+}
+
 function setStatus(message) {
     document.getElementById("statusBox").textContent = message;
 }
@@ -47,6 +64,8 @@ function setBusyState(nextBusy) {
     busy = nextBusy;
     document.getElementById("chooseFolderButton").disabled = nextBusy;
     document.getElementById("chooseVideoPresetButton").disabled = nextBusy;
+    document.getElementById("chooseMp3PresetButton").disabled = nextBusy;
+    document.getElementById("chooseWavPresetButton").disabled = nextBusy;
     document.getElementById("exportButton").disabled = nextBusy;
     document.getElementById("chooseAlignFolderButton").disabled = nextBusy;
     document.getElementById("alignFolderButton").disabled = nextBusy;
@@ -524,16 +543,45 @@ function runGithubUpdate() {
         });
 }
 
-function loadSavedVideoPreset() {
-    try {
-        const saved = localStorage.getItem(VIDEO_PRESET_STORAGE_KEY);
-        if (saved && saved.trim() && fileExists(saved)) {
-            videoPresetPath = saved;
-            return;
-        }
-    } catch (error) {}
+function loadSavedPresets() {
+    const defaults = {
+        video: getDefaultVideoPresetPath(),
+        mp3: getDefaultMp3PresetPath(),
+        wav: getDefaultWavPresetPath()
+    };
 
-    videoPresetPath = DEFAULT_VIDEO_PRESET_PATH;
+    try {
+        const savedVideo = localStorage.getItem(VIDEO_PRESET_STORAGE_KEY);
+        if (savedVideo && savedVideo.trim() && fileExists(savedVideo)) {
+            videoPresetPath = savedVideo;
+        } else {
+            videoPresetPath = defaults.video;
+        }
+    } catch (error) {
+        videoPresetPath = defaults.video;
+    }
+
+    try {
+        const savedMp3 = localStorage.getItem(MP3_PRESET_STORAGE_KEY);
+        if (savedMp3 && savedMp3.trim() && fileExists(savedMp3)) {
+            mp3PresetPath = savedMp3;
+        } else {
+            mp3PresetPath = defaults.mp3;
+        }
+    } catch (error) {
+        mp3PresetPath = defaults.mp3;
+    }
+
+    try {
+        const savedWav = localStorage.getItem(WAV_PRESET_STORAGE_KEY);
+        if (savedWav && savedWav.trim() && fileExists(savedWav)) {
+            wavPresetPath = savedWav;
+        } else {
+            wavPresetPath = defaults.wav;
+        }
+    } catch (error) {
+        wavPresetPath = defaults.wav;
+    }
 }
 
 function loadSavedPaths() {
@@ -562,6 +610,30 @@ function saveVideoPreset(nextPath) {
     } catch (error) {}
 
     document.getElementById("videoPresetPath").textContent = videoPresetPath;
+}
+
+function saveMp3Preset(nextPath) {
+    mp3PresetPath = nextPath;
+
+    try {
+        localStorage.setItem(MP3_PRESET_STORAGE_KEY, nextPath);
+    } catch (error) {}
+
+    updateAudioPresetDisplay();
+}
+
+function saveWavPreset(nextPath) {
+    wavPresetPath = nextPath;
+
+    try {
+        localStorage.setItem(WAV_PRESET_STORAGE_KEY, nextPath);
+    } catch (error) {}
+
+    updateAudioPresetDisplay();
+}
+
+function updateAudioPresetDisplay() {
+    document.getElementById("audioPresetPath").textContent = `MP3: ${mp3PresetPath}\nWAV: ${wavPresetPath}`;
 }
 
 async function getActiveSequenceName() {
@@ -714,6 +786,30 @@ async function chooseVideoPreset() {
     }
 }
 
+async function chooseMp3Preset() {
+    if (busy) {
+        return;
+    }
+
+    const result = window.cep.fs.showOpenDialogEx(false, false, "Choose Premiere MP3 Preset (.epr)", null, ["epr"]);
+    if (result.data && result.data.length > 0) {
+        saveMp3Preset(result.data[0]);
+        setStatus("MP3 preset updated. This choice will be remembered until you change it.");
+    }
+}
+
+async function chooseWavPreset() {
+    if (busy) {
+        return;
+    }
+
+    const result = window.cep.fs.showOpenDialogEx(false, false, "Choose Premiere WAV Preset (.epr)", null, ["epr"]);
+    if (result.data && result.data.length > 0) {
+        saveWavPreset(result.data[0]);
+        setStatus("WAV preset updated. This choice will be remembered until you change it.");
+    }
+}
+
 async function runExport() {
     if (busy) {
         return;
@@ -732,12 +828,12 @@ async function runExport() {
         return;
     }
 
-    if (exportMp3 && !fileExists(MP3_PRESET_PATH)) {
+    if (exportMp3 && !fileExists(mp3PresetPath)) {
         alert("The MP3 preset file was not found.");
         return;
     }
 
-    if (exportWav && !fileExists(WAV_PRESET_PATH)) {
+    if (exportWav && !fileExists(wavPresetPath)) {
         alert("The WAV preset file was not found.");
         return;
     }
@@ -763,7 +859,7 @@ async function runExport() {
 
     setStatus("Queueing Media Encoder jobs...");
 
-    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(MP3_PRESET_PATH)}","${escapeForEvalScript(WAV_PRESET_PATH)}",${exportMp3},${exportWav},${backupVideoTrackNumber})`;
+    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}",${exportMp3},${exportWav},${backupVideoTrackNumber})`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 
@@ -863,7 +959,7 @@ async function alignExistingFolder() {
 
 document.addEventListener("DOMContentLoaded", () => {
     readVersionInfo();
-    loadSavedVideoPreset();
+    loadSavedPresets();
     loadSavedPaths();
     markBackupInputsDirty();
     markAlignmentInputsDirty();
@@ -872,7 +968,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setUpdateButton("Check for Updates", false);
     checkForUpdates();
     document.getElementById("videoPresetPath").textContent = videoPresetPath;
-    document.getElementById("audioPresetPath").textContent = `MP3: ${MP3_PRESET_PATH}\nWAV: ${WAV_PRESET_PATH}`;
+    updateAudioPresetDisplay();
     setStatus("Ready.");
     refreshAlignmentDefaults(false);
 });

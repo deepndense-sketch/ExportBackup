@@ -553,13 +553,36 @@ exportBackup.alignExistingFolder = function (folderPath, videoTrackNumber, audio
             return ebResult(false, "Choose a folder first.");
         }
 
-        var matchInfo = ebGetManifestMatchInfo(folderPath);
+        var manifestMatchInfo = ebGetManifestMatchInfo(folderPath);
+        var sequenceMatchInfo = ebGetSequenceMatchInfo(sequence, folderPath);
+        var matchInfo = manifestMatchInfo;
+
         if (!matchInfo || (!matchInfo.video && !matchInfo.audio.length)) {
-            matchInfo = ebGetSequenceMatchInfo(sequence, folderPath);
+            matchInfo = sequenceMatchInfo;
         }
 
         if (!matchInfo.video && !matchInfo.audio.length) {
-            return ebResult(false, "No files matching " + matchInfo.baseName + "_BACKUP or " + matchInfo.baseName + "_TrackN were found in the chosen folder.");
+            var manifestBase = manifestMatchInfo && manifestMatchInfo.baseName ? manifestMatchInfo.baseName : "(none)";
+            var manifestPath = manifestMatchInfo && manifestMatchInfo.manifest ? manifestMatchInfo.manifest : "(none)";
+            var manifestVideo = manifestMatchInfo && manifestMatchInfo.video ? manifestMatchInfo.video : "(none)";
+            var manifestAudioCount = manifestMatchInfo && manifestMatchInfo.audio ? manifestMatchInfo.audio.length : 0;
+            var sequenceBase = sequenceMatchInfo && sequenceMatchInfo.baseName ? sequenceMatchInfo.baseName : "(none)";
+            var sequenceManifestPath = sequenceMatchInfo && sequenceMatchInfo.manifest ? sequenceMatchInfo.manifest : "(none)";
+            var sequenceVideo = sequenceMatchInfo && sequenceMatchInfo.video ? sequenceMatchInfo.video : "(none)";
+            var sequenceAudioCount = sequenceMatchInfo && sequenceMatchInfo.audio ? sequenceMatchInfo.audio.length : 0;
+
+            return ebResult(
+                false,
+                "No files could be matched in the chosen folder.\n" +
+                "Manifest match base: " + manifestBase + "\n" +
+                "Manifest file: " + manifestPath + "\n" +
+                "Manifest video: " + manifestVideo + "\n" +
+                "Manifest audio count: " + manifestAudioCount + "\n" +
+                "Sequence match base: " + sequenceBase + "\n" +
+                "Sequence-side manifest: " + sequenceManifestPath + "\n" +
+                "Sequence video: " + sequenceVideo + "\n" +
+                "Sequence audio count: " + sequenceAudioCount
+            );
         }
 
         var notes = ebAlignFilesToSequence(

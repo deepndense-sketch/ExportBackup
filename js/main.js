@@ -390,11 +390,10 @@ async function alignExistingFolder() {
     const videoTrackNumber = getPositiveIntValue("alignVideoTrackInput", 1);
     const videoAudioTrackNumber = getPositiveIntValue("alignVideoAudioTrackInput", 1);
     const audioStartTrackNumber = getPositiveIntValue("alignAudioStartTrackInput", 1);
-    const audioEndTrackNumber = getPositiveIntValue("alignAudioEndTrackInput", audioStartTrackNumber);
 
     setStatus("Scanning folder and aligning files...");
 
-    const script = `exportBackup.alignExistingFolder("${escapeForEvalScript(alignFolder)}",${videoTrackNumber},${videoAudioTrackNumber},${audioStartTrackNumber},${audioEndTrackNumber})`;
+    const script = `exportBackup.alignExistingFolder("${escapeForEvalScript(alignFolder)}",${videoTrackNumber},${videoAudioTrackNumber},${audioStartTrackNumber})`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 

@@ -47,7 +47,7 @@ The current alignment workflow is intentionally manual:
 - match `SequenceName_TrackN.*`
 - place the backup video at sequence start on a chosen video track
 - place the backup video's own audio at sequence start on a chosen audio track
-- place the other audio files from a chosen start track up to a chosen end track
+- place the other audio files from a chosen start track upward automatically, one track at a time
 
 ## Presets Used
 

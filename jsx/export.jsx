@@ -494,13 +494,18 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
     );
 
     if (videoPath) {
-        var videoTrack = sequence.videoTracks[videoTrackNumber - 1];
         var videoItem = ebImportProjectItem(videoPath);
         if (!videoItem) {
             throw new Error("Could not import backup video: " + videoPath);
         }
-        videoTrack.overwriteClip(videoItem, when);
-        notes.push("Aligned backup video to V" + videoTrackNumber + ": " + videoPath);
+        if (videoAudioTrackNumber && videoAudioTrackNumber > 0 && sequence.overwriteClip) {
+            sequence.overwriteClip(videoItem, when.seconds, videoTrackNumber - 1, videoAudioTrackNumber - 1);
+            notes.push("Aligned backup video to V" + videoTrackNumber + " and A" + videoAudioTrackNumber + ": " + videoPath);
+        } else {
+            var videoTrack = sequence.videoTracks[videoTrackNumber - 1];
+            videoTrack.overwriteClip(videoItem, when);
+            notes.push("Aligned backup video to V" + videoTrackNumber + ": " + videoPath);
+        }
     } else {
         notes.push("No matching BACKUP video file was found.");
     }

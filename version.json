@@ -1,5 +1,5 @@
 {
-  "version": "1.2.25",
+  "version": "1.2.26",
   "channel": "main",
-  "notes": "Release 1.2.25 adds a show or hide presets toggle for the backup preset chooser area."
+  "notes": "Release 1.2.26 aligns the backup video clip to the selected video and audio tracks in one placement."
 }

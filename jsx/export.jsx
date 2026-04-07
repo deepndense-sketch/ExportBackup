@@ -267,17 +267,61 @@ function ebImportProjectItem(mediaPath) {
     return ebFindProjectItemByMediaPath(app.project.rootItem, fsPath);
 }
 
-function ebEnsureTrackCount(trackCollection, targetIndex) {
-    if (!trackCollection || targetIndex < 0) {
+function ebGetTrackCount(trackCollection) {
+    if (!trackCollection || trackCollection.numTracks === undefined) {
+        return 0;
+    }
+
+    return trackCollection.numTracks;
+}
+
+function ebValidateAvailableTracks(sequence, hasVideo, audioCount, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber) {
+    var currentVideoCount = ebGetTrackCount(sequence.videoTracks);
+    var currentAudioCount = ebGetTrackCount(sequence.audioTracks);
+    var requiredVideoCount = hasVideo ? Math.max(1, parseInt(videoTrackNumber, 10) || 1) : 0;
+    var requiredAudioCount = 0;
+
+    if (hasVideo && videoAudioTrackNumber && videoAudioTrackNumber > 0) {
+        requiredAudioCount = Math.max(requiredAudioCount, parseInt(videoAudioTrackNumber, 10) || 1);
+    }
+
+    if (audioCount > 0) {
+        requiredAudioCount = Math.max(
+            requiredAudioCount,
+            (parseInt(audioStartTrackNumber, 10) || 1) + audioCount - 1
+        );
+    }
+
+    if (currentVideoCount >= requiredVideoCount && currentAudioCount >= requiredAudioCount) {
         return;
     }
 
-    while (trackCollection.numTracks <= targetIndex) {
-        if (typeof trackCollection.addTrack !== "function") {
-            throw new Error("Premiere could not create enough tracks automatically.");
-        }
-        trackCollection.addTrack();
+    var lines = ["Not enough tracks in the active sequence."];
+
+    if (currentVideoCount < requiredVideoCount) {
+        lines.push("Video tracks needed: " + requiredVideoCount + ". Current video tracks: " + currentVideoCount + ".");
     }
+
+    if (currentAudioCount < requiredAudioCount) {
+        lines.push("Audio tracks needed: " + requiredAudioCount + ". Current audio tracks: " + currentAudioCount + ".");
+    }
+
+    if (hasVideo) {
+        lines.push("Backup video target: V" + videoTrackNumber + ".");
+        if (videoAudioTrackNumber && videoAudioTrackNumber > 0) {
+            lines.push("Backup video audio target: A" + videoAudioTrackNumber + ".");
+        }
+    }
+
+    if (audioCount > 0) {
+        lines.push(
+            "Other audio files: " + audioCount +
+            ". Start track: A" + audioStartTrackNumber +
+            ". End track needed: A" + ((parseInt(audioStartTrackNumber, 10) || 1) + audioCount - 1) + "."
+        );
+    }
+
+    throw new Error(lines.join("\n"));
 }
 
 function ebCreateTimeAtZero() {
@@ -294,9 +338,18 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
 
     var when = ebCreateTimeAtZero();
     var notes = [];
+    var hasVideo = !!videoPath;
+
+    ebValidateAvailableTracks(
+        sequence,
+        hasVideo,
+        audioEntries.length,
+        videoTrackNumber,
+        videoAudioTrackNumber,
+        audioStartTrackNumber
+    );
 
     if (videoPath) {
-        ebEnsureTrackCount(sequence.videoTracks, videoTrackNumber - 1);
         var videoTrack = sequence.videoTracks[videoTrackNumber - 1];
         var videoItem = ebImportProjectItem(videoPath);
         if (!videoItem) {
@@ -306,7 +359,6 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
         notes.push("Aligned backup video to V" + videoTrackNumber + ": " + videoPath);
 
         if (videoAudioTrackNumber && videoAudioTrackNumber > 0) {
-            ebEnsureTrackCount(sequence.audioTracks, videoAudioTrackNumber - 1);
             var backupAudioTrack = sequence.audioTracks[videoAudioTrackNumber - 1];
             backupAudioTrack.overwriteClip(videoItem, when);
             notes.push("Aligned backup video audio to A" + videoAudioTrackNumber + ": " + videoPath);
@@ -317,7 +369,6 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
 
     for (var i = 0; i < audioEntries.length; i++) {
         var targetTrackNumber = audioStartTrackNumber + i;
-        ebEnsureTrackCount(sequence.audioTracks, targetTrackNumber - 1);
         var audioTrack = sequence.audioTracks[targetTrackNumber - 1];
         var audioItem = ebImportProjectItem(audioEntries[i].path);
         if (!audioItem) {

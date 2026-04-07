@@ -428,6 +428,7 @@ function ebGetManifestMatchInfo(folderPath) {
     return {
         baseName: baseName,
         manifest: manifestFile,
+        manifestVideoPath: manifest.videoFile || "",
         video: video,
         audio: audio
     };
@@ -474,6 +475,18 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
     }
 
     return notes;
+}
+
+function ebDescribeFolderFiles(folderPath, limit) {
+    var files = ebReadFolderEntries(folderPath);
+    var names = [];
+    var max = limit || 20;
+
+    for (var i = 0; i < files.length && i < max; i++) {
+        names.push(files[i].name || "(unnamed)");
+    }
+
+    return names.join(" | ");
 }
 
 exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, exportMp3, exportWav) {
@@ -604,24 +617,28 @@ exportBackup.alignExistingFolder = function (folderPath, videoTrackNumber, video
         if (!matchInfo.video && !matchInfo.audio.length) {
             var manifestBase = manifestMatchInfo && manifestMatchInfo.baseName ? manifestMatchInfo.baseName : "(none)";
             var manifestPath = manifestMatchInfo && manifestMatchInfo.manifest ? manifestMatchInfo.manifest : "(none)";
+            var manifestRawVideoPath = manifestMatchInfo && manifestMatchInfo.manifestVideoPath ? manifestMatchInfo.manifestVideoPath : "(none)";
             var manifestVideo = manifestMatchInfo && manifestMatchInfo.video ? manifestMatchInfo.video : "(none)";
             var manifestAudioCount = manifestMatchInfo && manifestMatchInfo.audio ? manifestMatchInfo.audio.length : 0;
             var sequenceBase = sequenceMatchInfo && sequenceMatchInfo.baseName ? sequenceMatchInfo.baseName : "(none)";
             var sequenceManifestPath = sequenceMatchInfo && sequenceMatchInfo.manifest ? sequenceMatchInfo.manifest : "(none)";
             var sequenceVideo = sequenceMatchInfo && sequenceMatchInfo.video ? sequenceMatchInfo.video : "(none)";
             var sequenceAudioCount = sequenceMatchInfo && sequenceMatchInfo.audio ? sequenceMatchInfo.audio.length : 0;
+            var folderFiles = ebDescribeFolderFiles(folderPath, 30);
 
             return ebResult(
                 false,
                 "No files could be matched in the chosen folder.\n" +
                 "Manifest match base: " + manifestBase + "\n" +
                 "Manifest file: " + manifestPath + "\n" +
+                "Manifest raw video path: " + manifestRawVideoPath + "\n" +
                 "Manifest video: " + manifestVideo + "\n" +
                 "Manifest audio count: " + manifestAudioCount + "\n" +
                 "Sequence match base: " + sequenceBase + "\n" +
                 "Sequence-side manifest: " + sequenceManifestPath + "\n" +
                 "Sequence video: " + sequenceVideo + "\n" +
-                "Sequence audio count: " + sequenceAudioCount
+                "Sequence audio count: " + sequenceAudioCount + "\n" +
+                "Folder files seen: " + folderFiles
             );
         }
 

@@ -553,7 +553,6 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
 
         var sequenceName = ebGetSequenceExportBaseName(sequence);
         var originalMuteStates = ebCaptureMuteStates(sequence);
-        var originalVideoMuteStates = ebCaptureVideoMuteStates(sequence);
         var notes = [];
         var queuedCount = 0;
         var workAreaType = 1;
@@ -565,12 +564,8 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
         var videoPath = ebToFsPath(folderPath + "\\" + sequenceName + "_BACKUP" + videoExtension);
         var hiddenVideoTrackCount = 0;
         var videoJobId = 0;
-        try {
-            hiddenVideoTrackCount = ebHideVideoTracksAbove(sequence, resolvedBackupVideoTrackNumber);
-            videoJobId = ebQueueSequence(sequence, videoPath, videoPresetPath, workAreaType);
-        } finally {
-            ebRestoreVideoMuteStates(sequence, originalVideoMuteStates);
-        }
+        hiddenVideoTrackCount = ebHideVideoTracksAbove(sequence, resolvedBackupVideoTrackNumber);
+        videoJobId = ebQueueSequence(sequence, videoPath, videoPresetPath, workAreaType);
         if (!videoJobId || videoJobId === "0") {
             ebRestoreMuteStates(sequence, originalMuteStates);
             return ebResult(false, "Could not queue the MP4 export in Adobe Media Encoder.\nPreset: " + ebToFsPath(videoPresetPath) + "\nOutput: " + videoPath + "\nJob ID: " + videoJobId);
@@ -581,9 +576,9 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
         notes.push("MP4 job ID: " + videoJobId);
         notes.push("MP4 backup visible through V" + resolvedBackupVideoTrackNumber + ".");
         if (hiddenVideoTrackCount > 0) {
-            notes.push("Temporarily hid " + hiddenVideoTrackCount + " video track(s) above V" + resolvedBackupVideoTrackNumber + " for the MP4 queue job.");
+            notes.push("Left " + hiddenVideoTrackCount + " video track(s) above V" + resolvedBackupVideoTrackNumber + " hidden after queueing the MP4 backup.");
         } else {
-            notes.push("No video tracks above V" + resolvedBackupVideoTrackNumber + " needed to be hidden for the MP4 queue job.");
+            notes.push("No video tracks above V" + resolvedBackupVideoTrackNumber + " needed to be hidden for the MP4 backup.");
         }
 
         var trackCount = sequence.audioTracks && sequence.audioTracks.numTracks !== undefined ? sequence.audioTracks.numTracks : 0;

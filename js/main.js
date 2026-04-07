@@ -267,6 +267,10 @@ function getTempUpdaterScriptPath() {
     return path.join(os.tmpdir(), "ExportBackup_update_launch.ps1");
 }
 
+function getTempUpdaterZipPath() {
+    return path.join(os.tmpdir(), "ExportBackup_update_package.zip");
+}
+
 function getTempUpdaterResultPath() {
     return path.join(os.tmpdir(), "ExportBackup_update_result.json");
 }
@@ -356,6 +360,50 @@ function delay(ms) {
     });
 }
 
+function downloadFile(url, destinationPath) {
+    return new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(destinationPath);
+        const request = https.get(url, (response) => {
+            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                file.close(() => {
+                    fs.unlink(destinationPath, () => {
+                        downloadFile(response.headers.location, destinationPath).then(resolve).catch(reject);
+                    });
+                });
+                return;
+            }
+
+            if (response.statusCode !== 200) {
+                file.close(() => {
+                    fs.unlink(destinationPath, () => {});
+                    reject(new Error(`HTTP ${response.statusCode}`));
+                });
+                response.resume();
+                return;
+            }
+
+            response.pipe(file);
+            file.on("finish", () => {
+                file.close(resolve);
+            });
+        });
+
+        request.on("error", (error) => {
+            file.close(() => {
+                fs.unlink(destinationPath, () => {});
+                reject(error);
+            });
+        });
+
+        file.on("error", (error) => {
+            file.close(() => {
+                fs.unlink(destinationPath, () => {});
+                reject(error);
+            });
+        });
+    });
+}
+
 async function monitorUpdaterCompletion() {
     const maxAttempts = 10;
     const resultPath = getTempUpdaterResultPath();
@@ -414,13 +462,19 @@ function runGithubUpdate() {
         return;
     }
 
-    setStatus("Launching GitHub updater. Accept the Windows permission prompt if it appears.");
-
     const tempUpdaterScriptPath = getTempUpdaterScriptPath();
+    const tempUpdaterZipPath = getTempUpdaterZipPath();
     const tempUpdaterResultPath = getTempUpdaterResultPath();
     const tempUpdaterLogPath = getTempUpdaterLogPath();
+    const remoteZipUrl = "https://github.com/deepndense-sketch/ExportBackup/archive/refs/heads/main.zip";
+
+    setStatus("Downloading update package from GitHub...");
+
     try {
         fs.copyFileSync(updateScriptPath, tempUpdaterScriptPath);
+        if (fileExists(tempUpdaterZipPath)) {
+            fs.unlinkSync(tempUpdaterZipPath);
+        }
         if (fileExists(tempUpdaterResultPath)) {
             fs.unlinkSync(tempUpdaterResultPath);
         }
@@ -432,29 +486,34 @@ function runGithubUpdate() {
         return;
     }
 
-    const escapedScriptPath = tempUpdaterScriptPath.replace(/'/g, "''");
-    const systemDestination = "C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup".replace(/'/g, "''");
-    const escapedResultPath = tempUpdaterResultPath.replace(/'/g, "''");
-    const escapedLogPath = tempUpdaterLogPath.replace(/'/g, "''");
-    const command = `Start-Process PowerShell -Verb RunAs -ArgumentList '-NoExit','-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}','-Destination','${systemDestination}','-ResultPath','${escapedResultPath}','-LogPath','${escapedLogPath}'`;
+    downloadFile(remoteZipUrl, tempUpdaterZipPath)
+        .then(() => {
+            setStatus("Launching GitHub updater. Accept the Windows permission prompt if it appears.");
 
-    try {
-        childProcess.execFile(
-            "powershell.exe",
-            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
-            (error) => {
-                if (error) {
-                    setStatus(`Could not launch updater.\n${error.message}`);
-                    return;
+            const escapedScriptPath = tempUpdaterScriptPath.replace(/'/g, "''");
+            const escapedZipPath = tempUpdaterZipPath.replace(/'/g, "''");
+            const systemDestination = "C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup".replace(/'/g, "''");
+            const escapedResultPath = tempUpdaterResultPath.replace(/'/g, "''");
+            const escapedLogPath = tempUpdaterLogPath.replace(/'/g, "''");
+            const command = `Start-Process PowerShell -Verb RunAs -ArgumentList '-NoExit','-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}','-ZipPath','${escapedZipPath}','-Destination','${systemDestination}','-ResultPath','${escapedResultPath}','-LogPath','${escapedLogPath}'`;
+
+            childProcess.execFile(
+                "powershell.exe",
+                ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+                (error) => {
+                    if (error) {
+                        setStatus(`Could not launch updater.\n${error.message}`);
+                        return;
+                    }
+
+                    setStatus("Updater launched for the CEP extensions folder.\nTarget: C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup\nAn admin PowerShell window should show copy progress and stay open if something fails.");
+                    monitorUpdaterCompletion();
                 }
-
-                setStatus("Updater launched for the CEP extensions folder.\nTarget: C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup\nAn admin PowerShell window should show progress and stay open if something fails.");
-                monitorUpdaterCompletion();
-            }
-        );
-    } catch (error) {
-        setStatus(`Could not launch updater.\n${error.message}`);
-    }
+            );
+        })
+        .catch((error) => {
+            setStatus(`Could not prepare updater.\n${error.message}`);
+        });
 }
 
 function loadSavedVideoPreset() {

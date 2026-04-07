@@ -1,5 +1,5 @@
 param(
-    [string]$RepoZipUrl = "https://github.com/deepndense-sketch/ExportBackup/archive/refs/heads/main.zip",
+    [string]$ZipPath = "",
     [string]$Destination = "C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup",
     [string]$ResultPath = "",
     [string]$LogPath = ""
@@ -25,6 +25,7 @@ function Write-Result($ok, $message) {
         ok = $ok
         message = $message
         logPath = $LogPath
+        zipPath = $ZipPath
         destination = $Destination
     } | ConvertTo-Json -Compress
 
@@ -32,7 +33,6 @@ function Write-Result($ok, $message) {
 }
 
 $tempRoot = Join-Path $env:TEMP ("ExportBackupUpdate_" + [guid]::NewGuid().ToString("N"))
-$zipPath = Join-Path $tempRoot "ExportBackup-main.zip"
 $extractPath = Join-Path $tempRoot "extract"
 
 try {
@@ -41,11 +41,14 @@ try {
     New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
     New-Item -ItemType Directory -Force -Path $extractPath | Out-Null
 
-    Write-Step "Downloading latest package from GitHub."
-    Invoke-WebRequest -Uri $RepoZipUrl -OutFile $zipPath
+    if (-not $ZipPath -or -not (Test-Path $ZipPath)) {
+        throw "Prepared update package was not found: $ZipPath"
+    }
+
+    Write-Step "Using prepared package: $ZipPath"
 
     Write-Step "Extracting package."
-    Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+    Expand-Archive -Path $ZipPath -DestinationPath $extractPath -Force
 
     $sourceRoot = Join-Path $extractPath "ExportBackup-main"
     if (-not (Test-Path $sourceRoot)) {

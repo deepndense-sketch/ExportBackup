@@ -150,6 +150,29 @@ function ebCaptureMuteStates(sequence) {
     return states;
 }
 
+function ebCaptureVideoMuteStates(sequence) {
+    var states = [];
+
+    if (!sequence.videoTracks || sequence.videoTracks.numTracks === undefined) {
+        return states;
+    }
+
+    for (var i = 0; i < sequence.videoTracks.numTracks; i++) {
+        var track = sequence.videoTracks[i];
+        var muted = false;
+
+        try {
+            if (track && track.isMuted) {
+                muted = track.isMuted();
+            }
+        } catch (e) {}
+
+        states.push(muted ? 1 : 0);
+    }
+
+    return states;
+}
+
 function ebRestoreMuteStates(sequence, states) {
     if (!sequence.audioTracks || sequence.audioTracks.numTracks === undefined) {
         return;
@@ -157,6 +180,19 @@ function ebRestoreMuteStates(sequence, states) {
 
     for (var i = 0; i < sequence.audioTracks.numTracks; i++) {
         var track = sequence.audioTracks[i];
+        if (track && track.setMute && i < states.length) {
+            track.setMute(states[i]);
+        }
+    }
+}
+
+function ebRestoreVideoMuteStates(sequence, states) {
+    if (!sequence.videoTracks || sequence.videoTracks.numTracks === undefined) {
+        return;
+    }
+
+    for (var i = 0; i < sequence.videoTracks.numTracks; i++) {
+        var track = sequence.videoTracks[i];
         if (track && track.setMute && i < states.length) {
             track.setMute(states[i]);
         }
@@ -192,6 +228,27 @@ function ebSetOnlyTrackAudible(sequence, targetIndex) {
             track.setMute(i === targetIndex ? 0 : 1);
         }
     }
+}
+
+function ebHideVideoTracksAbove(sequence, visibleThroughTrackNumber) {
+    var hiddenCount = 0;
+    var maxVisible = Math.max(1, parseInt(visibleThroughTrackNumber, 10) || 1);
+
+    if (!sequence.videoTracks || sequence.videoTracks.numTracks === undefined) {
+        return hiddenCount;
+    }
+
+    for (var i = 0; i < sequence.videoTracks.numTracks; i++) {
+        if ((i + 1) > maxVisible) {
+            var track = sequence.videoTracks[i];
+            if (track && track.setMute) {
+                track.setMute(1);
+                hiddenCount += 1;
+            }
+        }
+    }
+
+    return hiddenCount;
 }
 
 function ebTrackHasClips(track) {
@@ -444,7 +501,7 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
     return notes;
 }
 
-exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, exportMp3, exportWav) {
+exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, exportMp3, exportWav, backupVideoTrackNumber, backupVideoAudioTrackNumber, audioStartTrackNumber) {
     try {
         var sequence = ebGetActiveSequence();
         if (!sequence) {
@@ -472,15 +529,26 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
 
         var sequenceName = ebGetSequenceExportBaseName(sequence);
         var originalMuteStates = ebCaptureMuteStates(sequence);
+        var originalVideoMuteStates = ebCaptureVideoMuteStates(sequence);
         var notes = [];
         var queuedCount = 0;
         var workAreaType = 1;
+        var resolvedBackupVideoTrackNumber = Math.max(1, parseInt(backupVideoTrackNumber, 10) || 5);
+        var resolvedBackupVideoAudioTrackNumber = Math.max(1, parseInt(backupVideoAudioTrackNumber, 10) || 1);
+        var resolvedAudioStartTrackNumber = Math.max(resolvedBackupVideoAudioTrackNumber + 1, parseInt(audioStartTrackNumber, 10) || (resolvedBackupVideoAudioTrackNumber + 1));
 
         ebSetAllTrackMutes(sequence, 0);
 
         var videoExtension = ebGetExportExtension(sequence, videoPresetPath, ".mp4");
         var videoPath = ebToFsPath(folderPath + "\\" + sequenceName + "_BACKUP" + videoExtension);
-        var videoJobId = ebQueueSequence(sequence, videoPath, videoPresetPath, workAreaType);
+        var hiddenVideoTrackCount = 0;
+        var videoJobId = 0;
+        try {
+            hiddenVideoTrackCount = ebHideVideoTracksAbove(sequence, resolvedBackupVideoTrackNumber);
+            videoJobId = ebQueueSequence(sequence, videoPath, videoPresetPath, workAreaType);
+        } finally {
+            ebRestoreVideoMuteStates(sequence, originalVideoMuteStates);
+        }
         if (!videoJobId || videoJobId === "0") {
             ebRestoreMuteStates(sequence, originalMuteStates);
             return ebResult(false, "Could not queue the MP4 export in Adobe Media Encoder.\nPreset: " + ebToFsPath(videoPresetPath) + "\nOutput: " + videoPath + "\nJob ID: " + videoJobId);
@@ -489,6 +557,12 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
         queuedCount += 1;
         notes.push("Queued MP4 backup: " + videoPath);
         notes.push("MP4 job ID: " + videoJobId);
+        notes.push("MP4 backup visible through V" + resolvedBackupVideoTrackNumber + ".");
+        if (hiddenVideoTrackCount > 0) {
+            notes.push("Temporarily hid " + hiddenVideoTrackCount + " video track(s) above V" + resolvedBackupVideoTrackNumber + " for the MP4 queue job.");
+        } else {
+            notes.push("No video tracks above V" + resolvedBackupVideoTrackNumber + " needed to be hidden for the MP4 queue job.");
+        }
 
         var trackCount = sequence.audioTracks && sequence.audioTracks.numTracks !== undefined ? sequence.audioTracks.numTracks : 0;
 
@@ -533,10 +607,14 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
         var manifest = '{' +
             '"sequenceName":"' + ebEscape(sequenceName) + '",' +
             '"folderPath":"' + ebEscape(ebToFsPath(folderPath)) + '",' +
-            '"videoFile":"' + ebEscape(videoPath) + '"' +
+            '"videoFile":"' + ebEscape(videoPath) + '",' +
+            '"backupVideoTrackNumber":' + resolvedBackupVideoTrackNumber + ',' +
+            '"backupVideoAudioTrackNumber":' + resolvedBackupVideoAudioTrackNumber + ',' +
+            '"audioStartTrackNumber":' + resolvedAudioStartTrackNumber +
         '}';
         ebWriteTextFile(manifestPath, manifest);
         notes.push("Saved alignment manifest: " + manifestPath);
+        notes.push("Saved alignment defaults: V" + resolvedBackupVideoTrackNumber + ", A" + resolvedBackupVideoAudioTrackNumber + ", other audio from A" + resolvedAudioStartTrackNumber + ".");
 
         notes.unshift("Queued jobs: " + queuedCount + ".");
         notes.push("All exports were sent to Adobe Media Encoder queue using sequence In/Out.");

@@ -1,5 +1,5 @@
 {
-  "version": "1.2.4",
+  "version": "1.2.5",
   "channel": "main",
-  "notes": "Release 1.2.4 after the occupied-track alignment warning update."
+  "notes": "Release 1.2.5 with export-time backup track selection and automatic hiding of higher video tracks."
 }

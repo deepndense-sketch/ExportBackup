@@ -233,6 +233,18 @@ button:disabled {
                     <div class="path-box" id="audioPresetPath"></div>
                 </div>
 
+                <div class="field">
+                    <label for="exportVideoTrackInput">Backup Video Track Number</label>
+                    <input id="exportVideoTrackInput" type="number" min="1" value="5">
+                </div>
+
+                <div class="field">
+                    <label for="exportVideoAudioTrackInput">Backup Video Audio Track Number</label>
+                    <input id="exportVideoAudioTrackInput" type="number" min="1" value="1">
+                </div>
+
+                <p class="muted" id="exportAudioStartHint">Other audio files will later start at A2.</p>
+
                 <label class="option">
                     <input type="checkbox" id="exportMp3Checkbox" checked>
                     <span>Queue each audio track as a separate MP3 file.</span>
@@ -245,7 +257,7 @@ button:disabled {
             </div>
         </div>
 
-        <p class="warning">Exports use sequence In/Out for encoding. Import and alignment from a folder are handled separately below.</p>
+        <p class="warning">Exports use sequence In/Out for encoding. For the MP4 backup, video tracks above the selected backup video track are hidden automatically while the queue job is created. Import and alignment from a folder are handled separately below.</p>
     </section>
 
     <section class="card stack">

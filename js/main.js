@@ -143,6 +143,45 @@ function getAlignmentInputs() {
     };
 }
 
+function getBackupInputs() {
+    return {
+        videoTrack: document.getElementById("exportVideoTrackInput"),
+        videoAudioTrack: document.getElementById("exportVideoAudioTrackInput"),
+        audioStartHint: document.getElementById("exportAudioStartHint")
+    };
+}
+
+function updateBackupAudioStartHint() {
+    const inputs = getBackupInputs();
+    if (!inputs.audioStartHint || !inputs.videoAudioTrack) {
+        return;
+    }
+
+    const startTrackNumber = getPositiveIntValue("exportVideoAudioTrackInput", DEFAULT_ALIGN_VIDEO_AUDIO_TRACK) + 1;
+    inputs.audioStartHint.textContent = `Other audio files will later start at A${startTrackNumber}.`;
+}
+
+function applyBackupDefaults(defaults, force) {
+    const values = defaults || getAlignmentDefaultValues();
+    const inputs = getBackupInputs();
+
+    [
+        { element: inputs.videoTrack, value: values.videoTrackNumber },
+        { element: inputs.videoAudioTrack, value: values.videoAudioTrackNumber }
+    ].forEach((entry) => {
+        if (!entry.element) {
+            return;
+        }
+
+        if (force || entry.element.dataset.userEdited !== "true") {
+            entry.element.value = String(entry.value);
+            entry.element.dataset.autoValue = String(entry.value);
+        }
+    });
+
+    updateBackupAudioStartHint();
+}
+
 function applyAlignmentDefaults(defaults, force) {
     const values = defaults || getAlignmentDefaultValues();
     const inputs = getAlignmentInputs();
@@ -163,6 +202,21 @@ function applyAlignmentDefaults(defaults, force) {
     });
 }
 
+function markBackupInputsDirty() {
+    const inputs = getBackupInputs();
+
+    [inputs.videoTrack, inputs.videoAudioTrack].forEach((input) => {
+        if (!input) {
+            return;
+        }
+
+        input.addEventListener("input", () => {
+            input.dataset.userEdited = "true";
+            updateBackupAudioStartHint();
+        });
+    });
+}
+
 function markAlignmentInputsDirty() {
     Object.values(getAlignmentInputs()).forEach((input) => {
         if (!input) {
@@ -179,6 +233,7 @@ async function refreshAlignmentDefaults(force) {
     const fallback = getAlignmentDefaultValues();
 
     if (!(await ensureHostLoaded())) {
+        applyBackupDefaults(fallback, force);
         applyAlignmentDefaults(fallback, force);
         return;
     }
@@ -187,18 +242,39 @@ async function refreshAlignmentDefaults(force) {
     const parsed = parseHostResult(result);
 
     if (!parsed || !parsed.ok) {
+        applyBackupDefaults(fallback, force);
         applyAlignmentDefaults(fallback, force);
         return;
     }
 
-    applyAlignmentDefaults(
-        {
-            videoTrackNumber: parsed.suggestedVideoTrack || DEFAULT_ALIGN_VIDEO_TRACK,
-            videoAudioTrackNumber: parsed.suggestedVideoAudioTrack || DEFAULT_ALIGN_VIDEO_AUDIO_TRACK,
-            audioStartTrackNumber: parsed.suggestedAudioStartTrack || DEFAULT_ALIGN_AUDIO_START_TRACK
-        },
-        force
-    );
+    const suggestedDefaults = {
+        videoTrackNumber: parsed.suggestedVideoTrack || DEFAULT_ALIGN_VIDEO_TRACK,
+        videoAudioTrackNumber: parsed.suggestedVideoAudioTrack || DEFAULT_ALIGN_VIDEO_AUDIO_TRACK,
+        audioStartTrackNumber: parsed.suggestedAudioStartTrack || DEFAULT_ALIGN_AUDIO_START_TRACK
+    };
+
+    applyBackupDefaults(suggestedDefaults, force);
+    applyAlignmentDefaults(suggestedDefaults, force);
+}
+
+function getManifestAlignmentDefaults(matchInfo) {
+    if (!matchInfo) {
+        return null;
+    }
+
+    const videoTrackNumber = parseInt(matchInfo.manifestBackupVideoTrackNumber, 10) || 0;
+    const videoAudioTrackNumber = parseInt(matchInfo.manifestBackupVideoAudioTrackNumber, 10) || 0;
+    const audioStartTrackNumber = parseInt(matchInfo.manifestAudioStartTrackNumber, 10) || 0;
+
+    if (!videoTrackNumber && !videoAudioTrackNumber && !audioStartTrackNumber) {
+        return null;
+    }
+
+    return {
+        videoTrackNumber: videoTrackNumber || DEFAULT_ALIGN_VIDEO_TRACK,
+        videoAudioTrackNumber: videoAudioTrackNumber || DEFAULT_ALIGN_VIDEO_AUDIO_TRACK,
+        audioStartTrackNumber: audioStartTrackNumber || ((videoAudioTrackNumber || DEFAULT_ALIGN_VIDEO_AUDIO_TRACK) + 1)
+    };
 }
 
 function readVersionInfo() {
@@ -432,6 +508,9 @@ function scanExportFolderForSequence(folderPath, sequenceName) {
         baseName: sanitizedBase,
         manifestPath: fs.existsSync(manifestPath) ? manifestPath : "",
         manifestVideoFile: manifest && manifest.videoFile ? manifest.videoFile : "",
+        manifestBackupVideoTrackNumber: manifest && manifest.backupVideoTrackNumber ? manifest.backupVideoTrackNumber : 0,
+        manifestBackupVideoAudioTrackNumber: manifest && manifest.backupVideoAudioTrackNumber ? manifest.backupVideoAudioTrackNumber : 0,
+        manifestAudioStartTrackNumber: manifest && manifest.audioStartTrackNumber ? manifest.audioStartTrackNumber : 0,
         videoPath,
         audio,
         folderFiles: files
@@ -467,6 +546,18 @@ async function chooseAlignFolder() {
         } catch (error) {}
         document.getElementById("alignPath").textContent = alignFolder;
         await refreshAlignmentDefaults(false);
+
+        try {
+            const activeSequenceName = await getActiveSequenceName();
+            if (activeSequenceName) {
+                const matchInfo = scanExportFolderForSequence(alignFolder, activeSequenceName);
+                const manifestDefaults = getManifestAlignmentDefaults(matchInfo);
+                if (manifestDefaults) {
+                    applyAlignmentDefaults(manifestDefaults, false);
+                }
+            }
+        } catch (error) {}
+
         setStatus("Align folder selected. Ready.");
     }
 }
@@ -521,7 +612,11 @@ async function runExport() {
 
     setStatus("Queueing Media Encoder jobs...");
 
-    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(MP3_PRESET_PATH)}","${escapeForEvalScript(WAV_PRESET_PATH)}",${exportMp3},${exportWav})`;
+    const backupVideoTrackNumber = getPositiveIntValue("exportVideoTrackInput", DEFAULT_ALIGN_VIDEO_TRACK);
+    const backupVideoAudioTrackNumber = getPositiveIntValue("exportVideoAudioTrackInput", DEFAULT_ALIGN_VIDEO_AUDIO_TRACK);
+    const audioStartTrackNumber = backupVideoAudioTrackNumber + 1;
+
+    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(MP3_PRESET_PATH)}","${escapeForEvalScript(WAV_PRESET_PATH)}",${exportMp3},${exportWav},${backupVideoTrackNumber},${backupVideoAudioTrackNumber},${audioStartTrackNumber})`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 
@@ -559,10 +654,6 @@ async function alignExistingFolder() {
         return;
     }
 
-    const videoTrackNumber = getPositiveIntValue("alignVideoTrackInput", 1);
-    const videoAudioTrackNumber = getPositiveIntValue("alignVideoAudioTrackInput", 1);
-    const audioStartTrackNumber = getPositiveIntValue("alignAudioStartTrackInput", 1);
-
     setStatus("Scanning folder and aligning files...");
 
     let matchInfo = null;
@@ -586,6 +677,15 @@ async function alignExistingFolder() {
         return;
     }
 
+    const manifestDefaults = getManifestAlignmentDefaults(matchInfo);
+    if (manifestDefaults) {
+        applyAlignmentDefaults(manifestDefaults, false);
+    }
+
+    const videoTrackNumber = getPositiveIntValue("alignVideoTrackInput", DEFAULT_ALIGN_VIDEO_TRACK);
+    const videoAudioTrackNumber = getPositiveIntValue("alignVideoAudioTrackInput", DEFAULT_ALIGN_VIDEO_AUDIO_TRACK);
+    const audioStartTrackNumber = getPositiveIntValue("alignAudioStartTrackInput", DEFAULT_ALIGN_AUDIO_START_TRACK);
+
     const audioJson = JSON.stringify(matchInfo.audio);
     const script = `exportBackup.alignMatchedFiles("${escapeForEvalScript(matchInfo.videoPath || "")}","${escapeForEvalScript(audioJson)}",${videoTrackNumber},${videoAudioTrackNumber},${audioStartTrackNumber})`;
     const result = await callHost(script);
@@ -604,7 +704,9 @@ document.addEventListener("DOMContentLoaded", () => {
     readVersionInfo();
     loadSavedVideoPreset();
     loadSavedPaths();
+    markBackupInputsDirty();
     markAlignmentInputsDirty();
+    applyBackupDefaults(getAlignmentDefaultValues(), true);
     applyAlignmentDefaults(getAlignmentDefaultValues(), true);
     setUpdateButton("Check for Updates", false);
     checkForUpdates();

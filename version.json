@@ -1,5 +1,5 @@
 {
-  "version": "1.2.24",
+  "version": "1.2.25",
   "channel": "main",
-  "notes": "Release 1.2.24 prevents duplicate backup video placement during alignment."
+  "notes": "Release 1.2.25 adds a show or hide presets toggle for the backup preset chooser area."
 }

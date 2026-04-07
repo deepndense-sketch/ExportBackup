@@ -150,9 +150,28 @@ button.preset-button:hover {
     border-color: rgba(255, 138, 61, 0.45);
 }
 
+.text-toggle {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.text-toggle:hover {
+    color: var(--text);
+    border-color: rgba(255, 138, 61, 0.45);
+}
+
 .button-stack {
     display: grid;
     gap: 10px;
+}
+
+.is-hidden {
+    display: none;
 }
 
 button.update-ready {
@@ -284,7 +303,11 @@ button:disabled {
             <p class="muted">Use this section to send the MP4 backup and optional audio exports to Adobe Media Encoder.</p>
         </div>
 
-        <div class="stack">
+        <div class="row">
+            <button id="togglePresetSectionButton" class="text-toggle" onclick="togglePresetSection()">Hide Presets</button>
+        </div>
+
+        <div id="presetSection" class="stack">
             <div class="action-line">
                 <button id="chooseVideoPresetButton" class="preset-button" onclick="chooseVideoPreset()">Choose Video Preset</button>
                 <div class="path-box action-value value-text" id="videoPresetPath"></div>

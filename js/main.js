@@ -10,6 +10,7 @@ const MP3_PRESET_STORAGE_KEY = "exportbackup.mp3PresetPath";
 const WAV_PRESET_STORAGE_KEY = "exportbackup.wavPresetPath";
 const EXPORT_FOLDER_STORAGE_KEY = "exportbackup.exportFolder";
 const ALIGN_FOLDER_STORAGE_KEY = "exportbackup.alignFolder";
+const PRESET_SECTION_VISIBLE_STORAGE_KEY = "exportbackup.presetSectionVisible";
 const DEFAULT_ALIGN_VIDEO_TRACK = 5;
 const DEFAULT_ALIGN_VIDEO_AUDIO_TRACK = 1;
 const DEFAULT_ALIGN_AUDIO_START_TRACK = 2;
@@ -23,6 +24,7 @@ let mp3PresetPath = "";
 let wavPresetPath = "";
 let localVersion = "unknown";
 let remoteVersion = null;
+let presetSectionVisible = true;
 
 function getExtensionRootPath() {
     try {
@@ -58,6 +60,27 @@ function getDefaultWavPresetPath() {
 
 function setStatus(message) {
     document.getElementById("statusBox").textContent = message;
+}
+
+function setPresetSectionVisibility(visible) {
+    presetSectionVisible = visible;
+
+    const presetSection = document.getElementById("presetSection");
+    const toggleButton = document.getElementById("togglePresetSectionButton");
+    if (!presetSection || !toggleButton) {
+        return;
+    }
+
+    presetSection.classList.toggle("is-hidden", !visible);
+    toggleButton.textContent = visible ? "Hide Presets" : "Show Presets";
+
+    try {
+        localStorage.setItem(PRESET_SECTION_VISIBLE_STORAGE_KEY, visible ? "true" : "false");
+    } catch (error) {}
+}
+
+function togglePresetSection() {
+    setPresetSectionVisibility(!presetSectionVisible);
 }
 
 function setBusyState(nextBusy) {
@@ -602,6 +625,18 @@ function loadSavedPaths() {
     } catch (error) {}
 }
 
+function loadSavedUiState() {
+    try {
+        const saved = localStorage.getItem(PRESET_SECTION_VISIBLE_STORAGE_KEY);
+        if (saved === "false") {
+            presetSectionVisible = false;
+            return;
+        }
+    } catch (error) {}
+
+    presetSectionVisible = true;
+}
+
 function saveVideoPreset(nextPath) {
     videoPresetPath = nextPath;
 
@@ -964,10 +999,12 @@ document.addEventListener("DOMContentLoaded", () => {
     readVersionInfo();
     loadSavedPresets();
     loadSavedPaths();
+    loadSavedUiState();
     markBackupInputsDirty();
     markAlignmentInputsDirty();
     applyBackupDefaults(getAlignmentDefaultValues(), true);
     applyAlignmentDefaults(getAlignmentDefaultValues(), true);
+    setPresetSectionVisibility(presetSectionVisible);
     setUpdateButton("Check for Updates", false);
     checkForUpdates();
     document.getElementById("videoPresetPath").textContent = videoPresetPath;

@@ -938,9 +938,11 @@ async function alignExistingFolder() {
     const videoTrackNumber = getPositiveIntValue("alignVideoTrackInput", DEFAULT_ALIGN_VIDEO_TRACK);
     const videoAudioTrackNumber = getPositiveIntValue("alignVideoAudioTrackInput", DEFAULT_ALIGN_VIDEO_AUDIO_TRACK);
     const audioStartTrackNumber = getPositiveIntValue("alignAudioStartTrackInput", DEFAULT_ALIGN_AUDIO_START_TRACK);
+    const skipBackupVideo = document.getElementById("alignSkipVideoCheckbox").checked;
 
     const audioJson = JSON.stringify(matchInfo.audio);
-    const script = `exportBackup.alignMatchedFiles("${escapeForEvalScript(matchInfo.videoPath || "")}","${escapeForEvalScript(audioJson)}",${videoTrackNumber},${videoAudioTrackNumber},${audioStartTrackNumber})`;
+    const resolvedVideoPath = skipBackupVideo ? "" : (matchInfo.videoPath || "");
+    const script = `exportBackup.alignMatchedFiles("${escapeForEvalScript(resolvedVideoPath)}","${escapeForEvalScript(audioJson)}",${videoTrackNumber},${videoAudioTrackNumber},${audioStartTrackNumber})`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 

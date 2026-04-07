@@ -1,5 +1,5 @@
 {
-  "version": "1.2.22",
+  "version": "1.2.23",
   "channel": "main",
-  "notes": "Release 1.2.22 restructures backup and align sections into clearer button-and-value rows with stronger heading emphasis."
+  "notes": "Release 1.2.23 adds an align option to skip importing the backup video and only align audio files."
 }

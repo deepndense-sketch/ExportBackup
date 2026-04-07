@@ -33,7 +33,7 @@ try {
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 
     Write-Step "Copying updated extension files."
-    $robocopyOutput = robocopy $sourceRoot $Destination /MIR /XD .git /XF deploy_extension.bat update_from_github.ps1
+    $robocopyOutput = robocopy $sourceRoot $Destination /MIR /XD .git
     $robocopyExit = $LASTEXITCODE
     if ($robocopyExit -ge 8) {
         throw "Robocopy failed with exit code $robocopyExit."

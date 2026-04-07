@@ -1,5 +1,6 @@
 const csInterface = new CSInterface();
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const childProcess = require("child_process");
 const https = require("https");
@@ -145,41 +146,22 @@ function getAlignmentInputs() {
 
 function getBackupInputs() {
     return {
-        videoTrack: document.getElementById("exportVideoTrackInput"),
-        videoAudioTrack: document.getElementById("exportVideoAudioTrackInput"),
-        audioStartHint: document.getElementById("exportAudioStartHint")
+        videoTrack: document.getElementById("exportVideoTrackInput")
     };
-}
-
-function updateBackupAudioStartHint() {
-    const inputs = getBackupInputs();
-    if (!inputs.audioStartHint || !inputs.videoAudioTrack) {
-        return;
-    }
-
-    const startTrackNumber = getPositiveIntValue("exportVideoAudioTrackInput", DEFAULT_ALIGN_VIDEO_AUDIO_TRACK) + 1;
-    inputs.audioStartHint.textContent = `Other audio files will later start at A${startTrackNumber}.`;
 }
 
 function applyBackupDefaults(defaults, force) {
     const values = defaults || getAlignmentDefaultValues();
     const inputs = getBackupInputs();
 
-    [
-        { element: inputs.videoTrack, value: values.videoTrackNumber },
-        { element: inputs.videoAudioTrack, value: values.videoAudioTrackNumber }
-    ].forEach((entry) => {
-        if (!entry.element) {
-            return;
-        }
+    if (!inputs.videoTrack) {
+        return;
+    }
 
-        if (force || entry.element.dataset.userEdited !== "true") {
-            entry.element.value = String(entry.value);
-            entry.element.dataset.autoValue = String(entry.value);
-        }
-    });
-
-    updateBackupAudioStartHint();
+    if (force || inputs.videoTrack.dataset.userEdited !== "true") {
+        inputs.videoTrack.value = String(values.videoTrackNumber);
+        inputs.videoTrack.dataset.autoValue = String(values.videoTrackNumber);
+    }
 }
 
 function applyAlignmentDefaults(defaults, force) {
@@ -195,9 +177,14 @@ function applyAlignmentDefaults(defaults, force) {
             return;
         }
 
+        const parsedValue = parseInt(entry.value, 10) || 0;
+        if (parsedValue < 1) {
+            return;
+        }
+
         if (force || entry.element.dataset.userEdited !== "true") {
-            entry.element.value = String(entry.value);
-            entry.element.dataset.autoValue = String(entry.value);
+            entry.element.value = String(parsedValue);
+            entry.element.dataset.autoValue = String(parsedValue);
         }
     });
 }
@@ -205,14 +192,13 @@ function applyAlignmentDefaults(defaults, force) {
 function markBackupInputsDirty() {
     const inputs = getBackupInputs();
 
-    [inputs.videoTrack, inputs.videoAudioTrack].forEach((input) => {
+    [inputs.videoTrack].forEach((input) => {
         if (!input) {
             return;
         }
 
         input.addEventListener("input", () => {
             input.dataset.userEdited = "true";
-            updateBackupAudioStartHint();
         });
     });
 }
@@ -271,10 +257,14 @@ function getManifestAlignmentDefaults(matchInfo) {
     }
 
     return {
-        videoTrackNumber: videoTrackNumber || DEFAULT_ALIGN_VIDEO_TRACK,
-        videoAudioTrackNumber: videoAudioTrackNumber || DEFAULT_ALIGN_VIDEO_AUDIO_TRACK,
-        audioStartTrackNumber: audioStartTrackNumber || ((videoAudioTrackNumber || DEFAULT_ALIGN_VIDEO_AUDIO_TRACK) + 1)
+        videoTrackNumber,
+        videoAudioTrackNumber,
+        audioStartTrackNumber
     };
+}
+
+function getTempUpdaterScriptPath() {
+    return path.join(os.tmpdir(), "ExportBackup_update_launch.ps1");
 }
 
 function readVersionInfo(silent) {
@@ -394,7 +384,15 @@ function runGithubUpdate() {
 
     setStatus("Launching GitHub updater. Accept the Windows permission prompt if it appears.");
 
-    const escapedScriptPath = updateScriptPath.replace(/'/g, "''");
+    const tempUpdaterScriptPath = getTempUpdaterScriptPath();
+    try {
+        fs.copyFileSync(updateScriptPath, tempUpdaterScriptPath);
+    } catch (error) {
+        setStatus(`Could not prepare updater.\n${error.message}`);
+        return;
+    }
+
+    const escapedScriptPath = tempUpdaterScriptPath.replace(/'/g, "''");
     const systemDestination = "C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup".replace(/'/g, "''");
     const command = `Start-Process PowerShell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}','-Destination','${systemDestination}'`;
 
@@ -637,10 +635,7 @@ async function runExport() {
     setStatus("Queueing Media Encoder jobs...");
 
     const backupVideoTrackNumber = getPositiveIntValue("exportVideoTrackInput", DEFAULT_ALIGN_VIDEO_TRACK);
-    const backupVideoAudioTrackNumber = getPositiveIntValue("exportVideoAudioTrackInput", DEFAULT_ALIGN_VIDEO_AUDIO_TRACK);
-    const audioStartTrackNumber = backupVideoAudioTrackNumber + 1;
-
-    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(MP3_PRESET_PATH)}","${escapeForEvalScript(WAV_PRESET_PATH)}",${exportMp3},${exportWav},${backupVideoTrackNumber},${backupVideoAudioTrackNumber},${audioStartTrackNumber})`;
+    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(MP3_PRESET_PATH)}","${escapeForEvalScript(WAV_PRESET_PATH)}",${exportMp3},${exportWav},${backupVideoTrackNumber})`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 

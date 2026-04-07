@@ -501,7 +501,7 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
     return notes;
 }
 
-exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, exportMp3, exportWav, backupVideoTrackNumber, backupVideoAudioTrackNumber, audioStartTrackNumber) {
+exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, exportMp3, exportWav, backupVideoTrackNumber) {
     try {
         var sequence = ebGetActiveSequence();
         if (!sequence) {
@@ -534,8 +534,6 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
         var queuedCount = 0;
         var workAreaType = 1;
         var resolvedBackupVideoTrackNumber = Math.max(1, parseInt(backupVideoTrackNumber, 10) || 5);
-        var resolvedBackupVideoAudioTrackNumber = Math.max(1, parseInt(backupVideoAudioTrackNumber, 10) || 1);
-        var resolvedAudioStartTrackNumber = Math.max(resolvedBackupVideoAudioTrackNumber + 1, parseInt(audioStartTrackNumber, 10) || (resolvedBackupVideoAudioTrackNumber + 1));
 
         ebSetAllTrackMutes(sequence, 0);
 
@@ -608,13 +606,11 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
             '"sequenceName":"' + ebEscape(sequenceName) + '",' +
             '"folderPath":"' + ebEscape(ebToFsPath(folderPath)) + '",' +
             '"videoFile":"' + ebEscape(videoPath) + '",' +
-            '"backupVideoTrackNumber":' + resolvedBackupVideoTrackNumber + ',' +
-            '"backupVideoAudioTrackNumber":' + resolvedBackupVideoAudioTrackNumber + ',' +
-            '"audioStartTrackNumber":' + resolvedAudioStartTrackNumber +
+            '"backupVideoTrackNumber":' + resolvedBackupVideoTrackNumber +
         '}';
         ebWriteTextFile(manifestPath, manifest);
         notes.push("Saved alignment manifest: " + manifestPath);
-        notes.push("Saved alignment defaults: V" + resolvedBackupVideoTrackNumber + ", A" + resolvedBackupVideoAudioTrackNumber + ", other audio from A" + resolvedAudioStartTrackNumber + ".");
+        notes.push("Saved alignment default: V" + resolvedBackupVideoTrackNumber + ".");
 
         notes.unshift("Queued jobs: " + queuedCount + ".");
         notes.push("All exports were sent to Adobe Media Encoder queue using sequence In/Out.");

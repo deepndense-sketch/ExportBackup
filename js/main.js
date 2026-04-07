@@ -267,6 +267,14 @@ function getTempUpdaterScriptPath() {
     return path.join(os.tmpdir(), "ExportBackup_update_launch.ps1");
 }
 
+function getTempUpdaterResultPath() {
+    return path.join(os.tmpdir(), "ExportBackup_update_result.json");
+}
+
+function getTempUpdaterLogPath() {
+    return path.join(os.tmpdir(), "ExportBackup_update_log.txt");
+}
+
 function readVersionInfo(silent) {
     try {
         const raw = fs.readFileSync(getVersionFilePath(), "utf8");
@@ -350,9 +358,33 @@ function delay(ms) {
 
 async function monitorUpdaterCompletion() {
     const maxAttempts = 10;
+    const resultPath = getTempUpdaterResultPath();
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         await delay(3000);
+
+        if (fileExists(resultPath)) {
+            try {
+                const raw = fs.readFileSync(resultPath, "utf8");
+                const parsed = JSON.parse(raw);
+                if (parsed.ok) {
+                    readVersionInfo(true);
+                    await checkForUpdates();
+                    setStatus(`Update complete.\nInstalled version: ${localVersion}\nRestart Premiere Pro if the panel was already open.`);
+                    return;
+                }
+
+                setStatus(
+                    `Updater failed.\n${parsed.message || "Unknown error."}\n` +
+                    `Log: ${parsed.logPath || getTempUpdaterLogPath()}`
+                );
+                return;
+            } catch (error) {
+                setStatus(`Updater finished, but the result file could not be read.\n${error.message}`);
+                return;
+            }
+        }
+
         readVersionInfo(true);
         await checkForUpdates();
 
@@ -385,8 +417,16 @@ function runGithubUpdate() {
     setStatus("Launching GitHub updater. Accept the Windows permission prompt if it appears.");
 
     const tempUpdaterScriptPath = getTempUpdaterScriptPath();
+    const tempUpdaterResultPath = getTempUpdaterResultPath();
+    const tempUpdaterLogPath = getTempUpdaterLogPath();
     try {
         fs.copyFileSync(updateScriptPath, tempUpdaterScriptPath);
+        if (fileExists(tempUpdaterResultPath)) {
+            fs.unlinkSync(tempUpdaterResultPath);
+        }
+        if (fileExists(tempUpdaterLogPath)) {
+            fs.unlinkSync(tempUpdaterLogPath);
+        }
     } catch (error) {
         setStatus(`Could not prepare updater.\n${error.message}`);
         return;
@@ -394,7 +434,9 @@ function runGithubUpdate() {
 
     const escapedScriptPath = tempUpdaterScriptPath.replace(/'/g, "''");
     const systemDestination = "C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup".replace(/'/g, "''");
-    const command = `Start-Process PowerShell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}','-Destination','${systemDestination}'`;
+    const escapedResultPath = tempUpdaterResultPath.replace(/'/g, "''");
+    const escapedLogPath = tempUpdaterLogPath.replace(/'/g, "''");
+    const command = `Start-Process PowerShell -Verb RunAs -ArgumentList '-NoExit','-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}','-Destination','${systemDestination}','-ResultPath','${escapedResultPath}','-LogPath','${escapedLogPath}'`;
 
     try {
         childProcess.execFile(
@@ -406,7 +448,7 @@ function runGithubUpdate() {
                     return;
                 }
 
-                setStatus("Updater launched for the CEP extensions folder.\nTarget: C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup\nRestart Premiere Pro after it finishes.");
+                setStatus("Updater launched for the CEP extensions folder.\nTarget: C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup\nAn admin PowerShell window should show progress and stay open if something fails.");
                 monitorUpdaterCompletion();
             }
         );

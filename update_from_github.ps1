@@ -1,12 +1,34 @@
 param(
     [string]$RepoZipUrl = "https://github.com/deepndense-sketch/ExportBackup/archive/refs/heads/main.zip",
-    [string]$Destination = "C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup"
+    [string]$Destination = "C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup",
+    [string]$ResultPath = "",
+    [string]$LogPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 
+if (-not $LogPath -or -not $LogPath.Trim()) {
+    $LogPath = Join-Path $env:TEMP "ExportBackup_update_log.txt"
+}
+
+if (-not $ResultPath -or -not $ResultPath.Trim()) {
+    $ResultPath = Join-Path $env:TEMP "ExportBackup_update_result.json"
+}
+
 function Write-Step($message) {
     Write-Host "[ExportBackup Updater] $message"
+    Add-Content -Path $LogPath -Value ("[STEP] " + $message)
+}
+
+function Write-Result($ok, $message) {
+    $payload = @{
+        ok = $ok
+        message = $message
+        logPath = $LogPath
+        destination = $Destination
+    } | ConvertTo-Json -Compress
+
+    Set-Content -Path $ResultPath -Value $payload -Encoding UTF8
 }
 
 $tempRoot = Join-Path $env:TEMP ("ExportBackupUpdate_" + [guid]::NewGuid().ToString("N"))
@@ -14,6 +36,7 @@ $zipPath = Join-Path $tempRoot "ExportBackup-main.zip"
 $extractPath = Join-Path $tempRoot "extract"
 
 try {
+    Set-Content -Path $LogPath -Value ("ExportBackup updater started at " + (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")) -Encoding UTF8
     Write-Step "Preparing temporary workspace."
     New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
     New-Item -ItemType Directory -Force -Path $extractPath | Out-Null
@@ -41,6 +64,15 @@ try {
 
     Write-Step "Update completed successfully."
     Write-Host "Restart Premiere Pro if the panel is already open."
+    Write-Result $true "Update completed successfully."
+}
+catch {
+    $message = $_.Exception.Message
+    Add-Content -Path $LogPath -Value ("[ERROR] " + $message)
+    Write-Host "[ExportBackup Updater] ERROR: $message"
+    Write-Host "[ExportBackup Updater] Log file: $LogPath"
+    Write-Result $false $message
+    Read-Host "Update failed. Press Enter to close this window"
 }
 finally {
     if (Test-Path $tempRoot) {

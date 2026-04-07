@@ -105,6 +105,10 @@ function parseHostResult(raw) {
     }
 }
 
+function showBlockingMessage(message) {
+    alert(message);
+}
+
 function fileExists(filePath) {
     try {
         return !!filePath && fs.existsSync(filePath);
@@ -569,6 +573,15 @@ async function getActiveSequenceName() {
     return String(result || "").trim();
 }
 
+async function validateBackupExportSettings(backupVideoTrackNumber) {
+    if (!(await ensureHostLoaded())) {
+        return { ok: false, message: "Could not load Premiere host script." };
+    }
+
+    const result = await callHost(`exportBackup.validateBackupExportSettings(${backupVideoTrackNumber})`);
+    return parseHostResult(result) || { ok: false, message: result || "Unknown validation error." };
+}
+
 function parseTrackNumberFromFileName(name, baseName) {
     const lowerName = String(name || "").toLowerCase();
     const lowerBase = String(baseName || "").toLowerCase();
@@ -729,25 +742,40 @@ async function runExport() {
         return;
     }
 
+    const backupVideoTrackNumber = getPositiveIntValue("exportVideoTrackInput", DEFAULT_ALIGN_VIDEO_TRACK);
+
     setBusyState(true);
     setStatus("Loading Premiere host script...");
 
     if (!(await ensureHostLoaded())) {
+        showBlockingMessage("Could not load Premiere host script.");
+        setBusyState(false);
+        return;
+    }
+
+    const validation = await validateBackupExportSettings(backupVideoTrackNumber);
+    if (!validation.ok) {
+        showBlockingMessage(validation.message || "Backup export validation failed.");
+        setStatus(validation.message || "Backup export validation failed.");
         setBusyState(false);
         return;
     }
 
     setStatus("Queueing Media Encoder jobs...");
 
-    const backupVideoTrackNumber = getPositiveIntValue("exportVideoTrackInput", DEFAULT_ALIGN_VIDEO_TRACK);
     const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(MP3_PRESET_PATH)}","${escapeForEvalScript(WAV_PRESET_PATH)}",${exportMp3},${exportWav},${backupVideoTrackNumber})`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 
-    if (parsed && parsed.message) {
+    if (parsed && parsed.ok === false) {
+        setStatus(parsed.message || "Backup export failed.");
+        showBlockingMessage(parsed.message || "Backup export failed.");
+    } else if (parsed && parsed.message) {
         setStatus(parsed.message);
+        showBlockingMessage("Done.");
     } else {
         setStatus(result || "No response returned from Premiere.");
+        showBlockingMessage("Done.");
     }
 
     setBusyState(false);
@@ -767,6 +795,7 @@ async function alignExistingFolder() {
     setStatus("Loading Premiere host script...");
 
     if (!(await ensureHostLoaded())) {
+        showBlockingMessage("Could not load Premiere host script.");
         setBusyState(false);
         return;
     }
@@ -774,6 +803,7 @@ async function alignExistingFolder() {
     const activeSequenceName = await getActiveSequenceName();
     if (!activeSequenceName) {
         setStatus("No active sequence is open in Premiere Pro.");
+        showBlockingMessage("No active sequence is open in Premiere Pro.");
         setBusyState(false);
         return;
     }
@@ -785,18 +815,20 @@ async function alignExistingFolder() {
         matchInfo = scanExportFolderForSequence(alignFolder, activeSequenceName);
     } catch (error) {
         setStatus(`Could not read the chosen folder.\n${error.message}`);
+        showBlockingMessage(`Could not read the chosen folder.\n${error.message}`);
         setBusyState(false);
         return;
     }
 
     if (!matchInfo.videoPath && matchInfo.audio.length === 0) {
-        setStatus(
+        const message =
             "No files could be matched in the chosen folder.\n" +
             `Sequence base: ${matchInfo.baseName}\n` +
             `Manifest file: ${matchInfo.manifestPath || "(none)"}\n` +
             `Manifest video: ${matchInfo.manifestVideoFile || "(none)"}\n` +
-            `Folder files: ${matchInfo.folderFiles.join(" | ")}`
-        );
+            `Folder files: ${matchInfo.folderFiles.join(" | ")}`;
+        setStatus(message);
+        showBlockingMessage(message);
         setBusyState(false);
         return;
     }
@@ -815,10 +847,15 @@ async function alignExistingFolder() {
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 
-    if (parsed && parsed.message) {
+    if (parsed && parsed.ok === false) {
+        setStatus(parsed.message || "Alignment failed.");
+        showBlockingMessage(parsed.message || "Alignment failed.");
+    } else if (parsed && parsed.message) {
         setStatus(parsed.message);
+        showBlockingMessage("Done.");
     } else {
         setStatus(result || "No response returned from Premiere.");
+        showBlockingMessage("Done.");
     }
 
     setBusyState(false);

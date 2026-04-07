@@ -43,6 +43,30 @@ exportBackup.getActiveSequenceName = function () {
     return ebGetSequenceName(sequence);
 };
 
+exportBackup.validateBackupExportSettings = function (backupVideoTrackNumber) {
+    try {
+        var sequence = ebGetActiveSequence();
+        if (!sequence) {
+            return ebResult(false, "No active sequence is open in Premiere Pro.");
+        }
+
+        var resolvedBackupVideoTrackNumber = Math.max(1, parseInt(backupVideoTrackNumber, 10) || 1);
+        var currentVideoTracks = ebGetTrackCount(sequence.videoTracks);
+        if (resolvedBackupVideoTrackNumber > currentVideoTracks) {
+            return ebResult(false, "V" + resolvedBackupVideoTrackNumber + " does not exist in the active sequence.");
+        }
+
+        var targetVideoTrack = sequence.videoTracks[resolvedBackupVideoTrackNumber - 1];
+        if (ebTrackHasClips(targetVideoTrack)) {
+            return ebResult(false, "V" + resolvedBackupVideoTrackNumber + " is not empty.");
+        }
+
+        return ebResult(true, "OK");
+    } catch (e) {
+        return ebResult(false, e.toString());
+    }
+};
+
 exportBackup.getAlignmentDefaults = function () {
     try {
         var sequence = ebGetActiveSequence();

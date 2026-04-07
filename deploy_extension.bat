@@ -2,7 +2,7 @@
 setlocal
 
 set "SRC=D:\Work\Tools\ExportBackup"
-set "DEST=C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup"
+set "DEST=%APPDATA%\Adobe\CEP\extensions\ExportBackup"
 
 echo Source: %SRC%
 echo Destination: %DEST%

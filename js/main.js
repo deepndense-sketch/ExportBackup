@@ -4,8 +4,6 @@ const path = require("path");
 const childProcess = require("child_process");
 const https = require("https");
 
-const VERSION_FILE_PATH = path.join(__dirname, "..", "version.json");
-const UPDATE_SCRIPT_PATH = path.join(__dirname, "..", "update_from_github.ps1");
 const DEFAULT_VIDEO_PRESET_PATH = "D:\\Work\\Tools\\ExportBackup\\presets\\1080 AIR.epr";
 const MP3_PRESET_PATH = "D:\\Work\\Tools\\ExportBackup\\presets\\mp3.epr";
 const WAV_PRESET_PATH = "C:\\Program Files\\Adobe\\Adobe Media Encoder 2026\\MediaIO\\systempresets\\3F3F3F3F_57415645\\Waveform Audio 48kHz 16-bit.epr";
@@ -20,6 +18,22 @@ let busy = false;
 let videoPresetPath = DEFAULT_VIDEO_PRESET_PATH;
 let localVersion = "unknown";
 let remoteVersion = null;
+
+function getExtensionRootPath() {
+    try {
+        return csInterface.getSystemPath(SystemPath.EXTENSION);
+    } catch (error) {
+        return __dirname;
+    }
+}
+
+function getVersionFilePath() {
+    return path.join(getExtensionRootPath(), "version.json");
+}
+
+function getUpdateScriptPath() {
+    return path.join(getExtensionRootPath(), "update_from_github.ps1");
+}
 
 function setStatus(message) {
     document.getElementById("statusBox").textContent = message;
@@ -106,11 +120,12 @@ function getPositiveIntValue(elementId, fallbackValue) {
 
 function readVersionInfo() {
     try {
-        const raw = fs.readFileSync(VERSION_FILE_PATH, "utf8");
+        const raw = fs.readFileSync(getVersionFilePath(), "utf8");
         const parsed = JSON.parse(raw);
         localVersion = parsed.version || "unknown";
     } catch (error) {
         localVersion = "unknown";
+        setStatus(`Could not read version file.\n${error.message}`);
     }
 
     document.getElementById("versionValue").textContent = localVersion;
@@ -180,7 +195,8 @@ function runGithubUpdate() {
         return;
     }
 
-    if (!fileExists(UPDATE_SCRIPT_PATH)) {
+    const updateScriptPath = getUpdateScriptPath();
+    if (!fileExists(updateScriptPath)) {
         setStatus("Update script was not found.");
         return;
     }
@@ -193,8 +209,10 @@ function runGithubUpdate() {
 
     setStatus("Launching GitHub updater. Accept the Windows permission prompt if it appears.");
 
-    const escapedScriptPath = UPDATE_SCRIPT_PATH.replace(/'/g, "''");
-    const command = `Start-Process PowerShell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}'`;
+    const escapedScriptPath = updateScriptPath.replace(/'/g, "''");
+    const appData = process.env.APPDATA || "";
+    const userDestination = path.join(appData, "Adobe", "CEP", "extensions", "ExportBackup").replace(/'/g, "''");
+    const command = `Start-Process PowerShell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}','-Destination','${userDestination}'`;
 
     try {
         childProcess.execFile(
@@ -206,7 +224,7 @@ function runGithubUpdate() {
                     return;
                 }
 
-                setStatus("Updater launched. After the copy finishes, restart Premiere Pro if needed.");
+                setStatus(`Updater launched for user CEP folder.\nTarget: ${path.join(process.env.APPDATA || "", "Adobe", "CEP", "extensions", "ExportBackup")}\nRestart Premiere Pro after it finishes.`);
                 setTimeout(() => {
                     checkForUpdates();
                 }, 3000);

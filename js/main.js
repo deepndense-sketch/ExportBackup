@@ -210,9 +210,8 @@ function runGithubUpdate() {
     setStatus("Launching GitHub updater. Accept the Windows permission prompt if it appears.");
 
     const escapedScriptPath = updateScriptPath.replace(/'/g, "''");
-    const appData = process.env.APPDATA || "";
-    const userDestination = path.join(appData, "Adobe", "CEP", "extensions", "ExportBackup").replace(/'/g, "''");
-    const command = `Start-Process PowerShell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}','-Destination','${userDestination}'`;
+    const systemDestination = "C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup".replace(/'/g, "''");
+    const command = `Start-Process PowerShell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}','-Destination','${systemDestination}'`;
 
     try {
         childProcess.execFile(
@@ -224,7 +223,7 @@ function runGithubUpdate() {
                     return;
                 }
 
-                setStatus(`Updater launched for user CEP folder.\nTarget: ${path.join(process.env.APPDATA || "", "Adobe", "CEP", "extensions", "ExportBackup")}\nRestart Premiere Pro after it finishes.`);
+                setStatus("Updater launched for the CEP extensions folder.\nTarget: C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup\nRestart Premiere Pro after it finishes.");
                 setTimeout(() => {
                     checkForUpdates();
                 }, 3000);

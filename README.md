@@ -68,10 +68,6 @@ The intended installed location is:
 
 - `C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup`
 
-For easier self-updating without admin prompts, the updater now targets the user CEP folder by default:
-
-- `%APPDATA%\Adobe\CEP\extensions\ExportBackup`
-
 The panel checks GitHub on load by comparing local `version.json` against:
 
 - `https://raw.githubusercontent.com/deepndense-sketch/ExportBackup/main/version.json`
@@ -80,4 +76,8 @@ When `Update From GitHub` is used, the updater script downloads:
 
 - `https://github.com/deepndense-sketch/ExportBackup/archive/refs/heads/main.zip`
 
-It then extracts that ZIP and mirrors the contents into the installed CEP extension folder. The updater now prefers the user CEP extensions folder so normal updates do not require administrator permission.
+It then extracts that ZIP and mirrors the contents into the installed CEP extension folder:
+
+- `C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup`
+
+Because that destination is under `Program Files`, Windows may prompt for administrator permission.

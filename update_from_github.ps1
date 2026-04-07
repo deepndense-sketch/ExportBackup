@@ -1,6 +1,6 @@
 param(
     [string]$RepoZipUrl = "https://github.com/deepndense-sketch/ExportBackup/archive/refs/heads/main.zip",
-    [string]$Destination = "$env:APPDATA\Adobe\CEP\extensions\ExportBackup"
+    [string]$Destination = "C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup"
 )
 
 $ErrorActionPreference = "Stop"

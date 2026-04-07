@@ -81,6 +81,7 @@ p {
     flex-wrap: wrap;
     color: var(--muted);
     font-size: 13px;
+    align-items: center;
 }
 
 .stack {
@@ -116,6 +117,12 @@ button.secondary {
     background: var(--panel-soft);
     color: var(--text);
     border: 1px solid var(--line);
+}
+
+button.update-ready {
+    background: linear-gradient(135deg, #56a7ff, #2d73ff);
+    color: #f7fbff;
+    border: 1px solid rgba(140, 188, 255, 0.45);
 }
 
 button:disabled {
@@ -190,8 +197,7 @@ button:disabled {
         </div>
         <div class="meta-row">
             <div>Version: <span id="versionValue">...</span></div>
-            <div>Update: <span id="updateValue">Not checked</span></div>
-            <div><button id="updateButton" class="secondary" onclick="runGithubUpdate()">Update From GitHub</button></div>
+            <div><button id="updateButton" class="secondary" onclick="runGithubUpdate()">Check for Updates</button></div>
         </div>
     </section>
 

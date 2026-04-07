@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "channel": "main",
-  "notes": "Adds version display, deploy script, normalized BACKUP/Track naming, and folder-based alignment."
+  "notes": "Improves GitHub update detection, simplifies the updater UI, and highlights available updates."
 }

@@ -2,6 +2,7 @@ const csInterface = new CSInterface();
 const fs = require("fs");
 const path = require("path");
 const childProcess = require("child_process");
+const https = require("https");
 
 const VERSION_FILE_PATH = path.join(__dirname, "..", "version.json");
 const UPDATE_SCRIPT_PATH = path.join(__dirname, "..", "update_from_github.ps1");
@@ -18,13 +19,10 @@ let hostLoaded = false;
 let busy = false;
 let videoPresetPath = DEFAULT_VIDEO_PRESET_PATH;
 let localVersion = "unknown";
+let remoteVersion = null;
 
 function setStatus(message) {
     document.getElementById("statusBox").textContent = message;
-}
-
-function setUpdateMessage(message) {
-    document.getElementById("updateValue").textContent = message;
 }
 
 function setBusyState(nextBusy) {
@@ -35,6 +33,18 @@ function setBusyState(nextBusy) {
     document.getElementById("chooseAlignFolderButton").disabled = nextBusy;
     document.getElementById("alignFolderButton").disabled = nextBusy;
     document.getElementById("updateButton").disabled = nextBusy;
+}
+
+function setUpdateButton(label, isUpdateAvailable) {
+    const button = document.getElementById("updateButton");
+    button.textContent = label;
+    if (isUpdateAvailable) {
+        button.classList.add("update-ready");
+        button.classList.remove("secondary");
+    } else {
+        button.classList.remove("update-ready");
+        button.classList.add("secondary");
+    }
 }
 
 function escapeForEvalScript(value) {
@@ -127,24 +137,41 @@ function compareVersions(a, b) {
 
 async function checkForUpdates() {
     const remoteUrl = "https://raw.githubusercontent.com/deepndense-sketch/ExportBackup/main/version.json";
-    setUpdateMessage("Checking...");
+    setUpdateButton("Checking...", false);
 
     try {
-        const response = await fetch(remoteUrl, { cache: "no-store" });
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
+        const remote = await new Promise((resolve, reject) => {
+            https.get(remoteUrl, (response) => {
+                if (response.statusCode !== 200) {
+                    reject(new Error(`HTTP ${response.statusCode}`));
+                    response.resume();
+                    return;
+                }
 
-        const remote = await response.json();
-        const remoteVersion = remote.version || "unknown";
+                let raw = "";
+                response.setEncoding("utf8");
+                response.on("data", (chunk) => {
+                    raw += chunk;
+                });
+                response.on("end", () => {
+                    try {
+                        resolve(JSON.parse(raw));
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            }).on("error", reject);
+        });
+
+        remoteVersion = remote.version || "unknown";
 
         if (compareVersions(remoteVersion, localVersion) > 0) {
-            setUpdateMessage(`Update available: ${remoteVersion}`);
+            setUpdateButton(`Update to ${remoteVersion}`, true);
         } else {
-            setUpdateMessage("Up to date");
+            setUpdateButton("Up to date", false);
         }
     } catch (error) {
-        setUpdateMessage("Check failed");
+        setUpdateButton("Check failed", false);
     }
 }
 
@@ -155,6 +182,12 @@ function runGithubUpdate() {
 
     if (!fileExists(UPDATE_SCRIPT_PATH)) {
         setStatus("Update script was not found.");
+        return;
+    }
+
+    if (remoteVersion && compareVersions(remoteVersion, localVersion) <= 0) {
+        setStatus("This installation is already up to date.");
+        checkForUpdates();
         return;
     }
 
@@ -362,6 +395,7 @@ document.addEventListener("DOMContentLoaded", () => {
     readVersionInfo();
     loadSavedVideoPreset();
     loadSavedPaths();
+    setUpdateButton("Check for Updates", false);
     checkForUpdates();
     document.getElementById("videoPresetPath").textContent = videoPresetPath;
     document.getElementById("audioPresetPath").textContent = `MP3: ${MP3_PRESET_PATH}\nWAV: ${WAV_PRESET_PATH}`;

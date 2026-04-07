@@ -225,11 +225,6 @@ button:disabled {
                     <h2>Queued Video Preset</h2>
                     <div class="path-box" id="videoPresetPath"></div>
                 </div>
-
-                <div class="field">
-                    <label for="videoTrackInput">Backup Video Track Number</label>
-                    <input id="videoTrackInput" type="number" min="1" value="1">
-                </div>
             </div>
 
             <div class="stack">
@@ -247,20 +242,10 @@ button:disabled {
                     <input type="checkbox" id="exportWavCheckbox">
                     <span>Queue each audio track as a separate WAV file.</span>
                 </label>
-
-                <div class="field">
-                    <label for="audioStartTrackInput">Aligned Audio Start Track Number</label>
-                    <input id="audioStartTrackInput" type="number" min="1" value="1">
-                </div>
-
-                <label class="option">
-                    <input type="checkbox" id="saveAlignManifestCheckbox" checked>
-                    <span>Save an alignment manifest beside the exports for later recovery.</span>
-                </label>
             </div>
         </div>
 
-        <p class="warning">Exports use sequence In/Out for encoding, but alignment imports always start at the very beginning of the active sequence.</p>
+        <p class="warning">Exports use sequence In/Out for encoding. Import and alignment from a folder are handled separately below.</p>
     </section>
 
     <section class="card stack">
@@ -285,13 +270,23 @@ button:disabled {
 
             <div class="stack">
                 <div class="field">
-                    <label for="alignVideoTrackInput">Aligned Video Track Number</label>
+                    <label for="alignVideoTrackInput">Backup Video Track Number</label>
                     <input id="alignVideoTrackInput" type="number" min="1" value="1">
                 </div>
 
                 <div class="field">
-                    <label for="alignAudioStartTrackInput">Aligned Audio Start Track Number</label>
+                    <label for="alignVideoAudioTrackInput">Backup Video Audio Track Number</label>
+                    <input id="alignVideoAudioTrackInput" type="number" min="1" value="1">
+                </div>
+
+                <div class="field">
+                    <label for="alignAudioStartTrackInput">Other Audio Files Start Track Number</label>
                     <input id="alignAudioStartTrackInput" type="number" min="1" value="1">
+                </div>
+
+                <div class="field">
+                    <label for="alignAudioEndTrackInput">Other Audio Files End Track Number</label>
+                    <input id="alignAudioEndTrackInput" type="number" min="1" value="10">
                 </div>
             </div>
         </div>

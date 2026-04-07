@@ -331,9 +331,6 @@ async function runExport() {
 
     const exportMp3 = document.getElementById("exportMp3Checkbox").checked;
     const exportWav = document.getElementById("exportWavCheckbox").checked;
-    const videoTrackNumber = getPositiveIntValue("videoTrackInput", 1);
-    const audioStartTrackNumber = getPositiveIntValue("audioStartTrackInput", 1);
-    const saveAlignManifest = document.getElementById("saveAlignManifestCheckbox").checked;
 
     if (!fileExists(videoPresetPath)) {
         alert("The selected video preset file was not found. Choose the video preset again.");
@@ -360,7 +357,7 @@ async function runExport() {
 
     setStatus("Queueing Media Encoder jobs...");
 
-    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(MP3_PRESET_PATH)}","${escapeForEvalScript(WAV_PRESET_PATH)}",${exportMp3},${exportWav},${videoTrackNumber},${audioStartTrackNumber},${saveAlignManifest})`;
+    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(MP3_PRESET_PATH)}","${escapeForEvalScript(WAV_PRESET_PATH)}",${exportMp3},${exportWav})`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 
@@ -392,11 +389,13 @@ async function alignExistingFolder() {
     }
 
     const videoTrackNumber = getPositiveIntValue("alignVideoTrackInput", 1);
+    const videoAudioTrackNumber = getPositiveIntValue("alignVideoAudioTrackInput", 1);
     const audioStartTrackNumber = getPositiveIntValue("alignAudioStartTrackInput", 1);
+    const audioEndTrackNumber = getPositiveIntValue("alignAudioEndTrackInput", audioStartTrackNumber);
 
     setStatus("Scanning folder and aligning files...");
 
-    const script = `exportBackup.alignExistingFolder("${escapeForEvalScript(alignFolder)}",${videoTrackNumber},${audioStartTrackNumber})`;
+    const script = `exportBackup.alignExistingFolder("${escapeForEvalScript(alignFolder)}",${videoTrackNumber},${videoAudioTrackNumber},${audioStartTrackNumber},${audioEndTrackNumber})`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 

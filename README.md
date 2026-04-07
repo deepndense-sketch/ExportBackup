@@ -40,6 +40,15 @@ The panel now also includes:
 - manual folder-based alignment for files named like `SequenceName_BACKUP.mp4` and `SequenceName_Track1.wav`
 - a deployment batch file for copying the extension into Adobe's CEP extensions folder
 
+The current alignment workflow is intentionally manual:
+
+- choose a folder
+- match `SequenceName_BACKUP.*`
+- match `SequenceName_TrackN.*`
+- place the backup video at sequence start on a chosen video track
+- place the backup video's own audio at sequence start on a chosen audio track
+- place the other audio files from a chosen start track up to a chosen end track
+
 ## Presets Used
 
 - MP4 video defaults to: `D:\Work\Tools\ExportBackup\presets\1080 AIR.epr`

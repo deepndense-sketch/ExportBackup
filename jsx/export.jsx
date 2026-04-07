@@ -396,7 +396,7 @@ function ebGetManifestMatchInfo(folderPath) {
     };
 }
 
-function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNumber, audioStartTrackNumber) {
+function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber, audioEndTrackNumber) {
     if (!sequence) {
         throw new Error("No active sequence is open in Premiere Pro.");
     }
@@ -413,8 +413,26 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
         }
         videoTrack.overwriteClip(videoItem, when);
         notes.push("Aligned backup video to V" + videoTrackNumber + ": " + videoPath);
+
+        if (videoAudioTrackNumber && videoAudioTrackNumber > 0) {
+            ebEnsureTrackCount(sequence.audioTracks, videoAudioTrackNumber - 1);
+            var backupAudioTrack = sequence.audioTracks[videoAudioTrackNumber - 1];
+            backupAudioTrack.overwriteClip(videoItem, when);
+            notes.push("Aligned backup video audio to A" + videoAudioTrackNumber + ": " + videoPath);
+        }
     } else {
         notes.push("No matching BACKUP video file was found.");
+    }
+
+    if (audioEntries.length > 0 && audioEndTrackNumber < audioStartTrackNumber) {
+        throw new Error("Other audio files end track must be greater than or equal to the start track.");
+    }
+
+    if (audioEntries.length > 0) {
+        var availableTrackCount = (audioEndTrackNumber - audioStartTrackNumber) + 1;
+        if (audioEntries.length > availableTrackCount) {
+            throw new Error("Not enough destination tracks for the audio files. Files found: " + audioEntries.length + ", available tracks: " + availableTrackCount + ".");
+        }
     }
 
     for (var i = 0; i < audioEntries.length; i++) {
@@ -432,7 +450,7 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
     return notes;
 }
 
-exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, exportMp3, exportWav, videoTrackNumber, audioStartTrackNumber, saveAlignManifest) {
+exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, exportMp3, exportWav) {
     try {
         var sequence = ebGetActiveSequence();
         if (!sequence) {
@@ -517,18 +535,14 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
 
         ebRestoreMuteStates(sequence, originalMuteStates);
 
-        if (saveAlignManifest) {
-            var manifestPath = ebToFsPath(folderPath + "\\" + sequenceName + "_ALIGN.json");
-            var manifest = '{' +
-                '"sequenceName":"' + ebEscape(sequenceName) + '",' +
-                '"folderPath":"' + ebEscape(ebToFsPath(folderPath)) + '",' +
-                '"videoTrackNumber":' + (parseInt(videoTrackNumber, 10) || 1) + ',' +
-                '"audioStartTrackNumber":' + (parseInt(audioStartTrackNumber, 10) || 1) + ',' +
-                '"videoFile":"' + ebEscape(videoPath) + '"' +
-            '}';
-            ebWriteTextFile(manifestPath, manifest);
-            notes.push("Saved alignment manifest: " + manifestPath);
-        }
+        var manifestPath = ebToFsPath(folderPath + "\\" + sequenceName + "_ALIGN.json");
+        var manifest = '{' +
+            '"sequenceName":"' + ebEscape(sequenceName) + '",' +
+            '"folderPath":"' + ebEscape(ebToFsPath(folderPath)) + '",' +
+            '"videoFile":"' + ebEscape(videoPath) + '"' +
+        '}';
+        ebWriteTextFile(manifestPath, manifest);
+        notes.push("Saved alignment manifest: " + manifestPath);
 
         notes.unshift("Queued jobs: " + queuedCount + ".");
         notes.push("All exports were sent to Adobe Media Encoder queue using sequence In/Out.");
@@ -542,7 +556,7 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
     }
 };
 
-exportBackup.alignExistingFolder = function (folderPath, videoTrackNumber, audioStartTrackNumber) {
+exportBackup.alignExistingFolder = function (folderPath, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber, audioEndTrackNumber) {
     try {
         var sequence = ebGetActiveSequence();
         if (!sequence) {
@@ -590,7 +604,9 @@ exportBackup.alignExistingFolder = function (folderPath, videoTrackNumber, audio
             matchInfo.video,
             matchInfo.audio,
             parseInt(videoTrackNumber, 10) || 1,
-            parseInt(audioStartTrackNumber, 10) || 1
+            parseInt(videoAudioTrackNumber, 10) || 1,
+            parseInt(audioStartTrackNumber, 10) || 1,
+            parseInt(audioEndTrackNumber, 10) || (parseInt(audioStartTrackNumber, 10) || 1)
         );
 
         if (matchInfo.manifest) {

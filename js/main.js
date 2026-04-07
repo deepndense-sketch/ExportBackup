@@ -98,6 +98,7 @@ function setBusyState(nextBusy) {
 function setUpdateButton(label, isUpdateAvailable) {
     const button = document.getElementById("updateButton");
     button.textContent = label;
+    button.disabled = busy || !isUpdateAvailable;
     if (isUpdateAvailable) {
         button.classList.add("update-ready");
         button.classList.remove("secondary");
@@ -325,7 +326,6 @@ function readVersionInfo(silent) {
         }
     }
 
-    document.getElementById("versionValue").textContent = localVersion;
     return localVersion;
 }
 
@@ -350,7 +350,7 @@ function compareVersions(a, b) {
 
 async function checkForUpdates() {
     const remoteUrl = "https://raw.githubusercontent.com/deepndense-sketch/ExportBackup/main/version.json";
-    setUpdateButton("Checking...", false);
+    setUpdateButton(`Version ${localVersion}`, false);
 
     try {
         const remote = await new Promise((resolve, reject) => {
@@ -381,10 +381,10 @@ async function checkForUpdates() {
         if (compareVersions(remoteVersion, localVersion) > 0) {
             setUpdateButton(`Update to ${remoteVersion}`, true);
         } else {
-            setUpdateButton("Up to date", false);
+            setUpdateButton(`Version ${localVersion}`, false);
         }
     } catch (error) {
-        setUpdateButton("Check failed", false);
+        setUpdateButton(`Version ${localVersion}`, false);
     }
 }
 
@@ -960,7 +960,7 @@ document.addEventListener("DOMContentLoaded", () => {
     applyBackupDefaults(getAlignmentDefaultValues(), true);
     applyAlignmentDefaults(getAlignmentDefaultValues(), true);
     setPresetSectionVisibility(presetSectionVisible);
-    setUpdateButton("Check for Updates", false);
+    setUpdateButton(`Version ${localVersion}`, false);
     checkForUpdates();
     document.getElementById("videoPresetPath").textContent = videoPresetPath;
     updateAudioPresetDisplay();

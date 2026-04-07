@@ -93,6 +93,13 @@ p {
     align-items: center;
 }
 
+.title-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
 .stack {
     display: grid;
     gap: 14px;
@@ -287,12 +294,11 @@ button:disabled {
     <section class="card stack">
         <div>
             <p class="eyebrow">Premiere Pro Extension</p>
-            <h1>ExportBackup</h1>
+            <div class="title-row">
+                <h1>ExportBackup</h1>
+                <button id="updateButton" class="secondary" onclick="runGithubUpdate()">Version ...</button>
+            </div>
             <p class="muted">Queue a backup package for the active sequence in Adobe Media Encoder.</p>
-        </div>
-        <div class="meta-row">
-            <div>Version: <span id="versionValue">...</span></div>
-            <div><button id="updateButton" class="secondary" onclick="runGithubUpdate()">Check for Updates</button></div>
         </div>
     </section>
 

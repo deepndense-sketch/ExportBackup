@@ -1,5 +1,5 @@
 {
-  "version": "1.2.27",
+  "version": "1.3.0",
   "channel": "main",
-  "notes": "Release 1.2.27 removes alignment JSON export files and hides the preset section by default."
+  "notes": "Release 1.3.0 simplifies the header into one inline version or update button beside the title."
 }

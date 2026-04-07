@@ -277,17 +277,20 @@ function getManifestAlignmentDefaults(matchInfo) {
     };
 }
 
-function readVersionInfo() {
+function readVersionInfo(silent) {
     try {
         const raw = fs.readFileSync(getVersionFilePath(), "utf8");
         const parsed = JSON.parse(raw);
         localVersion = parsed.version || "unknown";
     } catch (error) {
         localVersion = "unknown";
-        setStatus(`Could not read version file.\n${error.message}`);
+        if (!silent) {
+            setStatus(`Could not read version file.\n${error.message}`);
+        }
     }
 
     document.getElementById("versionValue").textContent = localVersion;
+    return localVersion;
 }
 
 function compareVersions(a, b) {
@@ -349,6 +352,29 @@ async function checkForUpdates() {
     }
 }
 
+function delay(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+async function monitorUpdaterCompletion() {
+    const maxAttempts = 10;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        await delay(3000);
+        readVersionInfo(true);
+        await checkForUpdates();
+
+        if (remoteVersion && compareVersions(remoteVersion, localVersion) <= 0) {
+            setStatus(`Update complete.\nInstalled version: ${localVersion}\nRestart Premiere Pro if the panel was already open.`);
+            return;
+        }
+    }
+
+    setStatus(`Updater finished launching, but this panel still sees version ${localVersion}.\nIf the button stays blue, reopen the panel or restart Premiere Pro and check again.`);
+}
+
 function runGithubUpdate() {
     if (busy) {
         return;
@@ -383,9 +409,7 @@ function runGithubUpdate() {
                 }
 
                 setStatus("Updater launched for the CEP extensions folder.\nTarget: C:\\Program Files (x86)\\Common Files\\Adobe\\CEP\\extensions\\ExportBackup\nRestart Premiere Pro after it finishes.");
-                setTimeout(() => {
-                    checkForUpdates();
-                }, 3000);
+                monitorUpdaterCompletion();
             }
         );
     } catch (error) {

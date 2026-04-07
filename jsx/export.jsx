@@ -43,6 +43,30 @@ exportBackup.getActiveSequenceName = function () {
     return ebGetSequenceName(sequence);
 };
 
+exportBackup.getAlignmentDefaults = function () {
+    try {
+        var sequence = ebGetActiveSequence();
+        var currentVideoTracks = sequence ? ebGetTrackCount(sequence.videoTracks) : 0;
+        var currentAudioTracks = sequence ? ebGetTrackCount(sequence.audioTracks) : 0;
+        var suggestedVideoTrack = 5;
+        var suggestedVideoAudioTrack = currentAudioTracks + 1;
+        var suggestedAudioStartTrack = suggestedVideoAudioTrack + 1;
+
+        return '{' +
+            '"ok":true,' +
+            '"hasActiveSequence":' + (sequence ? 'true' : 'false') + ',' +
+            '"sequenceName":"' + ebEscape(sequence ? ebGetSequenceName(sequence) : "") + '",' +
+            '"currentVideoTracks":' + currentVideoTracks + ',' +
+            '"currentAudioTracks":' + currentAudioTracks + ',' +
+            '"suggestedVideoTrack":' + suggestedVideoTrack + ',' +
+            '"suggestedVideoAudioTrack":' + suggestedVideoAudioTrack + ',' +
+            '"suggestedAudioStartTrack":' + suggestedAudioStartTrack +
+        '}';
+    } catch (e) {
+        return '{"ok":false,"message":"' + ebEscape(e.toString()) + '"}';
+    }
+};
+
 function ebSanitizeName(name) {
     var value = String(name || "Active_Sequence");
     value = value.replace(/[\\\/:\*\?"<>\|]/g, "_");

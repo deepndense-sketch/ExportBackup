@@ -10,6 +10,9 @@ const WAV_PRESET_PATH = "C:\\Program Files\\Adobe\\Adobe Media Encoder 2026\\Med
 const VIDEO_PRESET_STORAGE_KEY = "exportbackup.videoPresetPath";
 const EXPORT_FOLDER_STORAGE_KEY = "exportbackup.exportFolder";
 const ALIGN_FOLDER_STORAGE_KEY = "exportbackup.alignFolder";
+const DEFAULT_ALIGN_VIDEO_TRACK = 5;
+const DEFAULT_ALIGN_VIDEO_AUDIO_TRACK = 1;
+const DEFAULT_ALIGN_AUDIO_START_TRACK = 2;
 
 let exportFolder = null;
 let alignFolder = null;
@@ -122,6 +125,80 @@ function sanitizeSequenceName(value) {
     return String(value || "Active_Sequence")
         .replace(/[\\\/:\*\?"<>\|]/g, "_")
         .trim() || "Active_Sequence";
+}
+
+function getAlignmentDefaultValues() {
+    return {
+        videoTrackNumber: DEFAULT_ALIGN_VIDEO_TRACK,
+        videoAudioTrackNumber: DEFAULT_ALIGN_VIDEO_AUDIO_TRACK,
+        audioStartTrackNumber: DEFAULT_ALIGN_AUDIO_START_TRACK
+    };
+}
+
+function getAlignmentInputs() {
+    return {
+        videoTrack: document.getElementById("alignVideoTrackInput"),
+        videoAudioTrack: document.getElementById("alignVideoAudioTrackInput"),
+        audioStartTrack: document.getElementById("alignAudioStartTrackInput")
+    };
+}
+
+function applyAlignmentDefaults(defaults, force) {
+    const values = defaults || getAlignmentDefaultValues();
+    const inputs = getAlignmentInputs();
+
+    [
+        { element: inputs.videoTrack, value: values.videoTrackNumber },
+        { element: inputs.videoAudioTrack, value: values.videoAudioTrackNumber },
+        { element: inputs.audioStartTrack, value: values.audioStartTrackNumber }
+    ].forEach((entry) => {
+        if (!entry.element) {
+            return;
+        }
+
+        if (force || entry.element.dataset.userEdited !== "true") {
+            entry.element.value = String(entry.value);
+            entry.element.dataset.autoValue = String(entry.value);
+        }
+    });
+}
+
+function markAlignmentInputsDirty() {
+    Object.values(getAlignmentInputs()).forEach((input) => {
+        if (!input) {
+            return;
+        }
+
+        input.addEventListener("input", () => {
+            input.dataset.userEdited = "true";
+        });
+    });
+}
+
+async function refreshAlignmentDefaults(force) {
+    const fallback = getAlignmentDefaultValues();
+
+    if (!(await ensureHostLoaded())) {
+        applyAlignmentDefaults(fallback, force);
+        return;
+    }
+
+    const result = await callHost("exportBackup.getAlignmentDefaults()");
+    const parsed = parseHostResult(result);
+
+    if (!parsed || !parsed.ok) {
+        applyAlignmentDefaults(fallback, force);
+        return;
+    }
+
+    applyAlignmentDefaults(
+        {
+            videoTrackNumber: parsed.suggestedVideoTrack || DEFAULT_ALIGN_VIDEO_TRACK,
+            videoAudioTrackNumber: parsed.suggestedVideoAudioTrack || DEFAULT_ALIGN_VIDEO_AUDIO_TRACK,
+            audioStartTrackNumber: parsed.suggestedAudioStartTrack || DEFAULT_ALIGN_AUDIO_START_TRACK
+        },
+        force
+    );
 }
 
 function readVersionInfo() {
@@ -389,6 +466,7 @@ async function chooseAlignFolder() {
             localStorage.setItem(ALIGN_FOLDER_STORAGE_KEY, alignFolder);
         } catch (error) {}
         document.getElementById("alignPath").textContent = alignFolder;
+        await refreshAlignmentDefaults(false);
         setStatus("Align folder selected. Ready.");
     }
 }
@@ -526,9 +604,12 @@ document.addEventListener("DOMContentLoaded", () => {
     readVersionInfo();
     loadSavedVideoPreset();
     loadSavedPaths();
+    markAlignmentInputsDirty();
+    applyAlignmentDefaults(getAlignmentDefaultValues(), true);
     setUpdateButton("Check for Updates", false);
     checkForUpdates();
     document.getElementById("videoPresetPath").textContent = videoPresetPath;
     document.getElementById("audioPresetPath").textContent = `MP3: ${MP3_PRESET_PATH}\nWAV: ${WAV_PRESET_PATH}`;
     setStatus("Waiting to start.");
+    refreshAlignmentDefaults(false);
 });

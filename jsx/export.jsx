@@ -190,6 +190,22 @@ function ebWriteTextFile(filePath, contents) {
     file.close();
 }
 
+function ebReadTextFile(filePath) {
+    var file = new File(ebToFsPath(filePath));
+    if (!file.exists) {
+        return null;
+    }
+
+    file.encoding = "UTF-8";
+    if (!file.open("r")) {
+        return null;
+    }
+
+    var contents = file.read();
+    file.close();
+    return contents;
+}
+
 function ebReadFolderEntries(folderPath) {
     var folder = new Folder(ebToFsPath(folderPath));
     if (!folder.exists) {
@@ -270,6 +286,8 @@ function ebGetSequenceMatchInfo(sequence, folderPath) {
     var files = ebReadFolderEntries(folderPath);
     var video = null;
     var audio = [];
+    var manifest = null;
+    var manifestPattern = new RegExp("^" + ebEscapeForRegex(baseName) + "_ALIGN\\.json$", "i");
     var videoPattern = new RegExp("^" + ebEscapeForRegex(baseName) + "_BACKUP\\.", "i");
     var audioPattern = new RegExp("^" + ebEscapeForRegex(baseName) + "_Track([0-9]+)\\.", "i");
 
@@ -277,6 +295,10 @@ function ebGetSequenceMatchInfo(sequence, folderPath) {
         var file = files[i];
         var name = file.name || "";
         var audioMatch = name.match(audioPattern);
+
+        if (!manifest && manifestPattern.test(name)) {
+            manifest = file.fsName;
+        }
 
         if (!video && videoPattern.test(name)) {
             video = file.fsName;
@@ -298,6 +320,77 @@ function ebGetSequenceMatchInfo(sequence, folderPath) {
 
     return {
         baseName: baseName,
+        manifest: manifest,
+        video: video,
+        audio: audio
+    };
+}
+
+function ebGetManifestMatchInfo(folderPath) {
+    var files = ebReadFolderEntries(folderPath);
+    var manifestFile = null;
+
+    for (var i = 0; i < files.length; i++) {
+        var name = files[i].name || "";
+        if (/_ALIGN\.json$/i.test(name)) {
+            manifestFile = files[i].fsName;
+            break;
+        }
+    }
+
+    if (!manifestFile) {
+        return null;
+    }
+
+    var raw = ebReadTextFile(manifestFile);
+    if (!raw) {
+        return null;
+    }
+
+    var manifest = null;
+    try {
+        manifest = JSON.parse(raw);
+    } catch (e) {
+        return null;
+    }
+
+    if (!manifest || !manifest.sequenceName) {
+        return null;
+    }
+
+    var baseName = ebSanitizeName(manifest.sequenceName);
+    var filesInFolder = ebReadFolderEntries(folderPath);
+    var video = null;
+    var audio = [];
+    var videoPattern = new RegExp("^" + ebEscapeForRegex(baseName) + "_BACKUP\\.", "i");
+    var audioPattern = new RegExp("^" + ebEscapeForRegex(baseName) + "_Track([0-9]+)\\.", "i");
+
+    for (var j = 0; j < filesInFolder.length; j++) {
+        var entry = filesInFolder[j];
+        var entryName = entry.name || "";
+        var audioMatch = entryName.match(audioPattern);
+
+        if (!video && videoPattern.test(entryName)) {
+            video = entry.fsName;
+            continue;
+        }
+
+        if (audioMatch) {
+            audio.push({
+                path: entry.fsName,
+                trackNumber: parseInt(audioMatch[1], 10) || 0,
+                name: entryName
+            });
+        }
+    }
+
+    audio.sort(function (a, b) {
+        return a.trackNumber - b.trackNumber;
+    });
+
+    return {
+        baseName: baseName,
+        manifest: manifestFile,
         video: video,
         audio: audio
     };
@@ -460,7 +553,11 @@ exportBackup.alignExistingFolder = function (folderPath, videoTrackNumber, audio
             return ebResult(false, "Choose a folder first.");
         }
 
-        var matchInfo = ebGetSequenceMatchInfo(sequence, folderPath);
+        var matchInfo = ebGetManifestMatchInfo(folderPath);
+        if (!matchInfo || (!matchInfo.video && !matchInfo.audio.length)) {
+            matchInfo = ebGetSequenceMatchInfo(sequence, folderPath);
+        }
+
         if (!matchInfo.video && !matchInfo.audio.length) {
             return ebResult(false, "No files matching " + matchInfo.baseName + "_BACKUP or " + matchInfo.baseName + "_TrackN were found in the chosen folder.");
         }
@@ -473,7 +570,11 @@ exportBackup.alignExistingFolder = function (folderPath, videoTrackNumber, audio
             parseInt(audioStartTrackNumber, 10) || 1
         );
 
-        notes.unshift("Alignment completed at sequence start for " + matchInfo.baseName + ".");
+        if (matchInfo.manifest) {
+            notes.unshift("Alignment completed at sequence start using manifest for " + matchInfo.baseName + ".");
+        } else {
+            notes.unshift("Alignment completed at sequence start for " + matchInfo.baseName + ".");
+        }
         return ebResult(true, notes.join("\n"));
     } catch (e) {
         return ebResult(false, e.toString());

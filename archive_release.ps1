@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = $PSScriptRoot
+$projectName = Split-Path $repoRoot -Leaf
 $versionFile = Join-Path $repoRoot "version.json"
 
 if (-not (Test-Path $versionFile)) {
@@ -19,10 +20,11 @@ if (-not $Version -or -not $Version.Trim()) {
 }
 
 if (-not $DestinationRoot -or -not $DestinationRoot.Trim()) {
-    $DestinationRoot = Join-Path (Split-Path $repoRoot -Parent) "ExportBackup_Versions"
+    $DestinationRoot = Join-Path (Split-Path $repoRoot -Parent) "Older Versions"
 }
 
-$destination = Join-Path $DestinationRoot $Version
+$projectArchiveRoot = Join-Path $DestinationRoot $projectName
+$destination = Join-Path $projectArchiveRoot $Version
 
 New-Item -ItemType Directory -Force $destination | Out-Null
 
@@ -56,4 +58,4 @@ $releaseInfo = [ordered]@{
 
 $releaseInfo | ConvertTo-Json | Set-Content (Join-Path $destination "release-info.json") -Encoding UTF8
 
-Write-Host "Archived ExportBackup version $Version to $destination"
+Write-Host "Archived $projectName version $Version to $destination"

@@ -43,6 +43,7 @@ The panel now also includes:
 The current alignment workflow is intentionally manual:
 
 - choose a folder
+- let the panel scan that folder directly
 - match `SequenceName_BACKUP.*`
 - match `SequenceName_TrackN.*`
 - place the backup video at sequence start on a chosen video track

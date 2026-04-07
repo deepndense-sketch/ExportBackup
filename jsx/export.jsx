@@ -34,6 +34,15 @@ function ebGetSequenceName(sequence) {
     return "Active_Sequence";
 }
 
+exportBackup.getActiveSequenceName = function () {
+    var sequence = ebGetActiveSequence();
+    if (!sequence) {
+        return "";
+    }
+
+    return ebGetSequenceName(sequence);
+};
+
 function ebSanitizeName(name) {
     var value = String(name || "Active_Sequence");
     value = value.replace(/[\\\/:\*\?"<>\|]/g, "_");
@@ -224,18 +233,6 @@ function ebReadFolderEntries(folderPath) {
     return files;
 }
 
-function ebFileExists(filePath) {
-    if (!filePath) {
-        return false;
-    }
-
-    try {
-        return new File(ebToFsPath(filePath)).exists;
-    } catch (e) {}
-
-    return false;
-}
-
 function ebFindProjectItemByMediaPath(rootItem, mediaPath) {
     if (!rootItem || !rootItem.children) {
         return null;
@@ -289,150 +286,6 @@ function ebCreateTimeAtZero() {
     return when;
 }
 
-function ebEscapeForRegex(value) {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function ebGetLowerName(value) {
-    return String(value || "").toLowerCase();
-}
-
-function ebParseTrackNumber(name, baseName) {
-    var lowerName = ebGetLowerName(name);
-    var lowerBase = ebGetLowerName(baseName);
-    var prefix = lowerBase + "_track";
-
-    if (lowerName.indexOf(prefix) !== 0) {
-        return 0;
-    }
-
-    var remainder = name.substring(prefix.length);
-    var dotIndex = remainder.lastIndexOf(".");
-    if (dotIndex <= 0) {
-        return 0;
-    }
-
-    var numberPart = remainder.substring(0, dotIndex);
-    return parseInt(numberPart, 10) || 0;
-}
-
-function ebGetSequenceMatchInfo(sequence, folderPath) {
-    var baseName = ebGetSequenceExportBaseName(sequence);
-    var files = ebReadFolderEntries(folderPath);
-    var video = null;
-    var audio = [];
-    var manifest = null;
-    var lowerBase = ebGetLowerName(baseName);
-    var manifestPrefix = lowerBase + "_align.json";
-    var videoPrefix = lowerBase + "_backup.";
-
-    for (var i = 0; i < files.length; i++) {
-        var file = files[i];
-        var name = file.name || "";
-        var lowerName = ebGetLowerName(name);
-        var trackNumber = ebParseTrackNumber(name, baseName);
-
-        if (!manifest && lowerName === manifestPrefix) {
-            manifest = file.fsName;
-        }
-
-        if (!video && lowerName.indexOf(videoPrefix) === 0) {
-            video = file.fsName;
-            continue;
-        }
-
-        if (trackNumber > 0) {
-            audio.push({
-                path: file.fsName,
-                trackNumber: trackNumber,
-                name: name
-            });
-        }
-    }
-
-    audio.sort(function (a, b) {
-        return a.trackNumber - b.trackNumber;
-    });
-
-    return {
-        baseName: baseName,
-        manifest: manifest,
-        video: video,
-        audio: audio
-    };
-}
-
-function ebGetManifestMatchInfo(folderPath) {
-    var files = ebReadFolderEntries(folderPath);
-    var manifestFile = null;
-
-    for (var i = 0; i < files.length; i++) {
-        var name = files[i].name || "";
-        if (/_ALIGN\.json$/i.test(name)) {
-            manifestFile = files[i].fsName;
-            break;
-        }
-    }
-
-    if (!manifestFile) {
-        return null;
-    }
-
-    var raw = ebReadTextFile(manifestFile);
-    if (!raw) {
-        return null;
-    }
-
-    var manifest = null;
-    try {
-        manifest = JSON.parse(raw);
-    } catch (e) {
-        return null;
-    }
-
-    if (!manifest || !manifest.sequenceName) {
-        return null;
-    }
-
-    var baseName = ebSanitizeName(manifest.sequenceName);
-    var filesInFolder = ebReadFolderEntries(folderPath);
-    var video = ebFileExists(manifest.videoFile) ? ebToFsPath(manifest.videoFile) : null;
-    var audio = [];
-    var lowerBase = ebGetLowerName(baseName);
-    var videoPrefix = lowerBase + "_backup.";
-
-    for (var j = 0; j < filesInFolder.length; j++) {
-        var entry = filesInFolder[j];
-        var entryName = entry.name || "";
-        var entryLowerName = ebGetLowerName(entryName);
-        var trackNumber = ebParseTrackNumber(entryName, baseName);
-
-        if (!video && entryLowerName.indexOf(videoPrefix) === 0) {
-            video = entry.fsName;
-            continue;
-        }
-
-        if (trackNumber > 0) {
-            audio.push({
-                path: entry.fsName,
-                trackNumber: trackNumber,
-                name: entryName
-            });
-        }
-    }
-
-    audio.sort(function (a, b) {
-        return a.trackNumber - b.trackNumber;
-    });
-
-    return {
-        baseName: baseName,
-        manifest: manifestFile,
-        manifestVideoPath: manifest.videoFile || "",
-        video: video,
-        audio: audio
-    };
-}
 
 function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber) {
     if (!sequence) {
@@ -475,18 +328,6 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
     }
 
     return notes;
-}
-
-function ebDescribeFolderFiles(folderPath, limit) {
-    var files = ebReadFolderEntries(folderPath);
-    var names = [];
-    var max = limit || 20;
-
-    for (var i = 0; i < files.length && i < max; i++) {
-        names.push(files[i].name || "(unnamed)");
-    }
-
-    return names.join(" | ");
 }
 
 exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, exportMp3, exportWav) {
@@ -595,67 +436,35 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
     }
 };
 
-exportBackup.alignExistingFolder = function (folderPath, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber) {
+exportBackup.alignMatchedFiles = function (videoPath, audioJson, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber) {
     try {
         var sequence = ebGetActiveSequence();
         if (!sequence) {
             return ebResult(false, "No active sequence is open in Premiere Pro.");
         }
-
-        if (!folderPath) {
-            return ebResult(false, "Choose a folder first.");
+        var parsedAudio = [];
+        if (audioJson) {
+            try {
+                parsedAudio = JSON.parse(audioJson);
+            } catch (e) {
+                return ebResult(false, "Could not parse audio file list.");
+            }
         }
 
-        var manifestMatchInfo = ebGetManifestMatchInfo(folderPath);
-        var sequenceMatchInfo = ebGetSequenceMatchInfo(sequence, folderPath);
-        var matchInfo = manifestMatchInfo;
-
-        if (!matchInfo || (!matchInfo.video && !matchInfo.audio.length)) {
-            matchInfo = sequenceMatchInfo;
-        }
-
-        if (!matchInfo.video && !matchInfo.audio.length) {
-            var manifestBase = manifestMatchInfo && manifestMatchInfo.baseName ? manifestMatchInfo.baseName : "(none)";
-            var manifestPath = manifestMatchInfo && manifestMatchInfo.manifest ? manifestMatchInfo.manifest : "(none)";
-            var manifestRawVideoPath = manifestMatchInfo && manifestMatchInfo.manifestVideoPath ? manifestMatchInfo.manifestVideoPath : "(none)";
-            var manifestVideo = manifestMatchInfo && manifestMatchInfo.video ? manifestMatchInfo.video : "(none)";
-            var manifestAudioCount = manifestMatchInfo && manifestMatchInfo.audio ? manifestMatchInfo.audio.length : 0;
-            var sequenceBase = sequenceMatchInfo && sequenceMatchInfo.baseName ? sequenceMatchInfo.baseName : "(none)";
-            var sequenceManifestPath = sequenceMatchInfo && sequenceMatchInfo.manifest ? sequenceMatchInfo.manifest : "(none)";
-            var sequenceVideo = sequenceMatchInfo && sequenceMatchInfo.video ? sequenceMatchInfo.video : "(none)";
-            var sequenceAudioCount = sequenceMatchInfo && sequenceMatchInfo.audio ? sequenceMatchInfo.audio.length : 0;
-            var folderFiles = ebDescribeFolderFiles(folderPath, 30);
-
-            return ebResult(
-                false,
-                "No files could be matched in the chosen folder.\n" +
-                "Manifest match base: " + manifestBase + "\n" +
-                "Manifest file: " + manifestPath + "\n" +
-                "Manifest raw video path: " + manifestRawVideoPath + "\n" +
-                "Manifest video: " + manifestVideo + "\n" +
-                "Manifest audio count: " + manifestAudioCount + "\n" +
-                "Sequence match base: " + sequenceBase + "\n" +
-                "Sequence-side manifest: " + sequenceManifestPath + "\n" +
-                "Sequence video: " + sequenceVideo + "\n" +
-                "Sequence audio count: " + sequenceAudioCount + "\n" +
-                "Folder files seen: " + folderFiles
-            );
+        if (!videoPath && (!parsedAudio || !parsedAudio.length)) {
+            return ebResult(false, "No matched video or audio files were provided.");
         }
 
         var notes = ebAlignFilesToSequence(
             sequence,
-            matchInfo.video,
-            matchInfo.audio,
+            videoPath,
+            parsedAudio || [],
             parseInt(videoTrackNumber, 10) || 1,
             parseInt(videoAudioTrackNumber, 10) || 1,
             parseInt(audioStartTrackNumber, 10) || 1
         );
 
-        if (matchInfo.manifest) {
-            notes.unshift("Alignment completed at sequence start using manifest for " + matchInfo.baseName + ".");
-        } else {
-            notes.unshift("Alignment completed at sequence start for " + matchInfo.baseName + ".");
-        }
+        notes.unshift("Alignment completed at sequence start.");
         return ebResult(true, notes.join("\n"));
     } catch (e) {
         return ebResult(false, e.toString());

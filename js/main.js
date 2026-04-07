@@ -118,6 +118,12 @@ function getPositiveIntValue(elementId, fallbackValue) {
     return parsed;
 }
 
+function sanitizeSequenceName(value) {
+    return String(value || "Active_Sequence")
+        .replace(/[\\\/:\*\?"<>\|]/g, "_")
+        .trim() || "Active_Sequence";
+}
+
 function readVersionInfo() {
     try {
         const raw = fs.readFileSync(getVersionFilePath(), "utf8");
@@ -274,6 +280,87 @@ function saveVideoPreset(nextPath) {
     document.getElementById("videoPresetPath").textContent = videoPresetPath;
 }
 
+async function getActiveSequenceName() {
+    if (!(await ensureHostLoaded())) {
+        return "";
+    }
+
+    const result = await callHost("exportBackup.getActiveSequenceName()");
+    return String(result || "").trim();
+}
+
+function parseTrackNumberFromFileName(name, baseName) {
+    const lowerName = String(name || "").toLowerCase();
+    const lowerBase = String(baseName || "").toLowerCase();
+    const prefix = `${lowerBase}_track`;
+
+    if (!lowerName.startsWith(prefix)) {
+        return 0;
+    }
+
+    const remainder = name.substring(prefix.length);
+    const dotIndex = remainder.lastIndexOf(".");
+    if (dotIndex <= 0) {
+        return 0;
+    }
+
+    return parseInt(remainder.substring(0, dotIndex), 10) || 0;
+}
+
+function scanExportFolderForSequence(folderPath, sequenceName) {
+    const sanitizedBase = sanitizeSequenceName(sequenceName);
+    const entries = fs.readdirSync(folderPath, { withFileTypes: true });
+    const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
+    const lowerBase = sanitizedBase.toLowerCase();
+    const backupPrefix = `${lowerBase}_backup.`;
+    const manifestName = `${sanitizedBase}_ALIGN.json`;
+    const manifestPath = path.join(folderPath, manifestName);
+
+    let manifest = null;
+    if (fs.existsSync(manifestPath)) {
+        try {
+            manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+        } catch (error) {}
+    }
+
+    let videoPath = "";
+    if (manifest && manifest.videoFile && fs.existsSync(manifest.videoFile)) {
+        videoPath = manifest.videoFile;
+    }
+
+    const audio = [];
+
+    files.forEach((fileName) => {
+        const absolutePath = path.join(folderPath, fileName);
+        const lowerName = fileName.toLowerCase();
+
+        if (!videoPath && lowerName.startsWith(backupPrefix)) {
+            videoPath = absolutePath;
+            return;
+        }
+
+        const trackNumber = parseTrackNumberFromFileName(fileName, sanitizedBase);
+        if (trackNumber > 0) {
+            audio.push({
+                path: absolutePath,
+                trackNumber,
+                name: fileName
+            });
+        }
+    });
+
+    audio.sort((a, b) => a.trackNumber - b.trackNumber);
+
+    return {
+        baseName: sanitizedBase,
+        manifestPath: fs.existsSync(manifestPath) ? manifestPath : "",
+        manifestVideoFile: manifest && manifest.videoFile ? manifest.videoFile : "",
+        videoPath,
+        audio,
+        folderFiles: files
+    };
+}
+
 async function chooseExportFolder() {
     if (busy) {
         return;
@@ -387,13 +474,42 @@ async function alignExistingFolder() {
         return;
     }
 
+    const activeSequenceName = await getActiveSequenceName();
+    if (!activeSequenceName) {
+        setStatus("No active sequence is open in Premiere Pro.");
+        setBusyState(false);
+        return;
+    }
+
     const videoTrackNumber = getPositiveIntValue("alignVideoTrackInput", 1);
     const videoAudioTrackNumber = getPositiveIntValue("alignVideoAudioTrackInput", 1);
     const audioStartTrackNumber = getPositiveIntValue("alignAudioStartTrackInput", 1);
 
     setStatus("Scanning folder and aligning files...");
 
-    const script = `exportBackup.alignExistingFolder("${escapeForEvalScript(alignFolder)}",${videoTrackNumber},${videoAudioTrackNumber},${audioStartTrackNumber})`;
+    let matchInfo = null;
+    try {
+        matchInfo = scanExportFolderForSequence(alignFolder, activeSequenceName);
+    } catch (error) {
+        setStatus(`Could not read the chosen folder.\n${error.message}`);
+        setBusyState(false);
+        return;
+    }
+
+    if (!matchInfo.videoPath && matchInfo.audio.length === 0) {
+        setStatus(
+            "No files could be matched in the chosen folder.\n" +
+            `Sequence base: ${matchInfo.baseName}\n` +
+            `Manifest file: ${matchInfo.manifestPath || "(none)"}\n` +
+            `Manifest video: ${matchInfo.manifestVideoFile || "(none)"}\n` +
+            `Folder files: ${matchInfo.folderFiles.join(" | ")}`
+        );
+        setBusyState(false);
+        return;
+    }
+
+    const audioJson = JSON.stringify(matchInfo.audio);
+    const script = `exportBackup.alignMatchedFiles("${escapeForEvalScript(matchInfo.videoPath || "")}","${escapeForEvalScript(audioJson)}",${videoTrackNumber},${videoAudioTrackNumber},${audioStartTrackNumber})`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 

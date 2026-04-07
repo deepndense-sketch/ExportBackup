@@ -36,6 +36,7 @@ The panel now also includes:
 
 - local version display from `version.json`
 - GitHub update check against the repository `main` branch
+- an `Update From GitHub` action which downloads the latest `main` branch ZIP and installs it into Adobe's CEP extensions folder
 - manual folder-based alignment for files named like `SequenceName_BACKUP.mp4` and `SequenceName_Track1.wav`
 - a deployment batch file for copying the extension into Adobe's CEP extensions folder
 
@@ -51,3 +52,19 @@ The panel now also includes:
 Premiere Pro's official scripting API supports muting audio tracks, but does not document track solo control. This extension can clear mutes for the MP4 queue job, but any solo state should be cleared manually in Premiere before running the tool.
 
 Track deletion is also not supported reliably through Premiere's official scripting API, so alignment works by placing files onto user-selected target tracks rather than deleting existing tracks.
+
+## Updating Installed Extensions
+
+The intended installed location is:
+
+- `C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup`
+
+The panel checks GitHub on load by comparing local `version.json` against:
+
+- `https://raw.githubusercontent.com/deepndense-sketch/ExportBackup/main/version.json`
+
+When `Update From GitHub` is used, the updater script downloads:
+
+- `https://github.com/deepndense-sketch/ExportBackup/archive/refs/heads/main.zip`
+
+It then extracts that ZIP and mirrors the contents into the installed CEP extension folder. Because that destination is under `Program Files`, Windows may prompt for administrator permission.

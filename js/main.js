@@ -1,8 +1,10 @@
 const csInterface = new CSInterface();
 const fs = require("fs");
 const path = require("path");
+const childProcess = require("child_process");
 
 const VERSION_FILE_PATH = path.join(__dirname, "..", "version.json");
+const UPDATE_SCRIPT_PATH = path.join(__dirname, "..", "update_from_github.ps1");
 const DEFAULT_VIDEO_PRESET_PATH = "D:\\Work\\Tools\\ExportBackup\\presets\\1080 AIR.epr";
 const MP3_PRESET_PATH = "D:\\Work\\Tools\\ExportBackup\\presets\\mp3.epr";
 const WAV_PRESET_PATH = "C:\\Program Files\\Adobe\\Adobe Media Encoder 2026\\MediaIO\\systempresets\\3F3F3F3F_57415645\\Waveform Audio 48kHz 16-bit.epr";
@@ -32,6 +34,7 @@ function setBusyState(nextBusy) {
     document.getElementById("exportButton").disabled = nextBusy;
     document.getElementById("chooseAlignFolderButton").disabled = nextBusy;
     document.getElementById("alignFolderButton").disabled = nextBusy;
+    document.getElementById("updateButton").disabled = nextBusy;
 }
 
 function escapeForEvalScript(value) {
@@ -142,6 +145,42 @@ async function checkForUpdates() {
         }
     } catch (error) {
         setUpdateMessage("Check failed");
+    }
+}
+
+function runGithubUpdate() {
+    if (busy) {
+        return;
+    }
+
+    if (!fileExists(UPDATE_SCRIPT_PATH)) {
+        setStatus("Update script was not found.");
+        return;
+    }
+
+    setStatus("Launching GitHub updater. Accept the Windows permission prompt if it appears.");
+
+    const escapedScriptPath = UPDATE_SCRIPT_PATH.replace(/'/g, "''");
+    const command = `Start-Process PowerShell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}'`;
+
+    try {
+        childProcess.execFile(
+            "powershell.exe",
+            ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+            (error) => {
+                if (error) {
+                    setStatus(`Could not launch updater.\n${error.message}`);
+                    return;
+                }
+
+                setStatus("Updater launched. After the copy finishes, restart Premiere Pro if needed.");
+                setTimeout(() => {
+                    checkForUpdates();
+                }, 3000);
+            }
+        );
+    } catch (error) {
+        setStatus(`Could not launch updater.\n${error.message}`);
     }
 }
 

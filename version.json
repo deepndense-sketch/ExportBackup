@@ -1,5 +1,5 @@
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "channel": "main",
-  "notes": "Improves GitHub update detection, simplifies the updater UI, and highlights available updates."
+  "notes": "Release 1.2.1 with manual folder-based alignment and improved updater behavior."
 }

@@ -82,3 +82,11 @@ It then extracts that ZIP and mirrors the contents into the installed CEP extens
 - `C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup`
 
 Because that destination is under `Program Files`, Windows may prompt for administrator permission.
+
+## Release Archives
+
+Released snapshots are now stored in a sibling folder under `D:\Work\Tools`:
+
+- `D:\Work\Tools\ExportBackup_Versions\<version>`
+
+Use `archive_release.ps1` from the repo root to copy the current project into that versioned archive folder and save a small `release-info.json` file with the version and commit.

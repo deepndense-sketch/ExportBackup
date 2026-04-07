@@ -424,11 +424,11 @@ function ebTryAddAudioTracks(sequence, requiredAudioCount) {
             return 0;
         }
 
-        var addAfterAudioIndex = Math.max(0, currentAudioCount - 1);
-
-        // QE DOM is unsupported, but this is the only practical path to append
-        // audio tracks during alignment when the official DOM cannot create them.
-        qeSequence.addTracks(0, 0, missingAudioCount, 3, addAfterAudioIndex);
+        // QE DOM is unsupported, but the simpler addTracks(0) form is the most
+        // reliable way we have found to append one normal audio track at a time.
+        for (var i = 0; i < missingAudioCount; i++) {
+            qeSequence.addTracks(0);
+        }
     } catch (e) {
         return 0;
     }

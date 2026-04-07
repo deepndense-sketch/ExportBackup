@@ -501,12 +501,6 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
         }
         videoTrack.overwriteClip(videoItem, when);
         notes.push("Aligned backup video to V" + videoTrackNumber + ": " + videoPath);
-
-        if (videoAudioTrackNumber && videoAudioTrackNumber > 0) {
-            var backupAudioTrack = sequence.audioTracks[videoAudioTrackNumber - 1];
-            backupAudioTrack.overwriteClip(videoItem, when);
-            notes.push("Aligned backup video audio to A" + videoAudioTrackNumber + ": " + videoPath);
-        }
     } else {
         notes.push("No matching BACKUP video file was found.");
     }

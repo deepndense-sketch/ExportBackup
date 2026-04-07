@@ -1,5 +1,5 @@
 {
-  "version": "1.2.26",
+  "version": "1.2.27",
   "channel": "main",
-  "notes": "Release 1.2.26 aligns the backup video clip to the selected video and audio tracks in one placement."
+  "notes": "Release 1.2.27 removes alignment JSON export files and hides the preset section by default."
 }

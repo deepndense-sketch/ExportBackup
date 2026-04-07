@@ -619,17 +619,6 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
 
         ebRestoreMuteStates(sequence, originalMuteStates);
 
-        var manifestPath = ebToFsPath(folderPath + "\\" + sequenceName + "_ALIGN.json");
-        var manifest = '{' +
-            '"sequenceName":"' + ebEscape(sequenceName) + '",' +
-            '"folderPath":"' + ebEscape(ebToFsPath(folderPath)) + '",' +
-            '"videoFile":"' + ebEscape(videoPath) + '",' +
-            '"backupVideoTrackNumber":' + resolvedBackupVideoTrackNumber +
-        '}';
-        ebWriteTextFile(manifestPath, manifest);
-        notes.push("Saved alignment manifest: " + manifestPath);
-        notes.push("Saved alignment default: V" + resolvedBackupVideoTrackNumber + ".");
-
         notes.unshift("Queued jobs: " + queuedCount + ".");
         notes.push("All exports were sent to Adobe Media Encoder queue using sequence In/Out.");
         notes.push("Expected names: " + sequenceName + "_BACKUP" + videoExtension + " and " + sequenceName + "_TrackN audio files.");

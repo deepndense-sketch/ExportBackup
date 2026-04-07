@@ -290,23 +290,7 @@ async function refreshAlignmentDefaults(force) {
 }
 
 function getManifestAlignmentDefaults(matchInfo) {
-    if (!matchInfo) {
-        return null;
-    }
-
-    const videoTrackNumber = parseInt(matchInfo.manifestBackupVideoTrackNumber, 10) || 0;
-    const videoAudioTrackNumber = parseInt(matchInfo.manifestBackupVideoAudioTrackNumber, 10) || 0;
-    const audioStartTrackNumber = parseInt(matchInfo.manifestAudioStartTrackNumber, 10) || 0;
-
-    if (!videoTrackNumber && !videoAudioTrackNumber && !audioStartTrackNumber) {
-        return null;
-    }
-
-    return {
-        videoTrackNumber,
-        videoAudioTrackNumber,
-        audioStartTrackNumber
-    };
+    return null;
 }
 
 function getTempUpdaterScriptPath() {
@@ -628,13 +612,13 @@ function loadSavedPaths() {
 function loadSavedUiState() {
     try {
         const saved = localStorage.getItem(PRESET_SECTION_VISIBLE_STORAGE_KEY);
-        if (saved === "false") {
-            presetSectionVisible = false;
+        if (saved === "true") {
+            presetSectionVisible = true;
             return;
         }
     } catch (error) {}
 
-    presetSectionVisible = true;
+    presetSectionVisible = false;
 }
 
 function saveVideoPreset(nextPath) {
@@ -714,21 +698,8 @@ function scanExportFolderForSequence(folderPath, sequenceName) {
     const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
     const lowerBase = sanitizedBase.toLowerCase();
     const backupPrefix = `${lowerBase}_backup.`;
-    const manifestName = `${sanitizedBase}_ALIGN.json`;
-    const manifestPath = path.join(folderPath, manifestName);
-
-    let manifest = null;
-    if (fs.existsSync(manifestPath)) {
-        try {
-            manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-        } catch (error) {}
-    }
 
     let videoPath = "";
-    if (manifest && manifest.videoFile && fs.existsSync(manifest.videoFile)) {
-        videoPath = manifest.videoFile;
-    }
-
     const audio = [];
 
     files.forEach((fileName) => {
@@ -754,11 +725,6 @@ function scanExportFolderForSequence(folderPath, sequenceName) {
 
     return {
         baseName: sanitizedBase,
-        manifestPath: fs.existsSync(manifestPath) ? manifestPath : "",
-        manifestVideoFile: manifest && manifest.videoFile ? manifest.videoFile : "",
-        manifestBackupVideoTrackNumber: manifest && manifest.backupVideoTrackNumber ? manifest.backupVideoTrackNumber : 0,
-        manifestBackupVideoAudioTrackNumber: manifest && manifest.backupVideoAudioTrackNumber ? manifest.backupVideoAudioTrackNumber : 0,
-        manifestAudioStartTrackNumber: manifest && manifest.audioStartTrackNumber ? manifest.audioStartTrackNumber : 0,
         videoPath,
         audio,
         folderFiles: files
@@ -799,10 +765,6 @@ async function chooseAlignFolder() {
             const activeSequenceName = await getActiveSequenceName();
             if (activeSequenceName) {
                 const matchInfo = scanExportFolderForSequence(alignFolder, activeSequenceName);
-                const manifestDefaults = getManifestAlignmentDefaults(matchInfo);
-                if (manifestDefaults) {
-                    applyAlignmentDefaults(manifestDefaults, false);
-                }
             }
         } catch (error) {}
 
@@ -956,18 +918,11 @@ async function alignExistingFolder() {
         const message =
             "No files could be matched in the chosen folder.\n" +
             `Sequence base: ${matchInfo.baseName}\n` +
-            `Manifest file: ${matchInfo.manifestPath || "(none)"}\n` +
-            `Manifest video: ${matchInfo.manifestVideoFile || "(none)"}\n` +
             `Folder files: ${matchInfo.folderFiles.join(" | ")}`;
         setStatus(message);
         showBlockingMessage(message);
         setBusyState(false);
         return;
-    }
-
-    const manifestDefaults = getManifestAlignmentDefaults(matchInfo);
-    if (manifestDefaults) {
-        applyAlignmentDefaults(manifestDefaults, false);
     }
 
     const videoTrackNumber = getPositiveIntValue("alignVideoTrackInput", DEFAULT_ALIGN_VIDEO_TRACK);

@@ -20,11 +20,10 @@ if (-not $Version -or -not $Version.Trim()) {
 }
 
 if (-not $DestinationRoot -or -not $DestinationRoot.Trim()) {
-    $DestinationRoot = Join-Path (Split-Path $repoRoot -Parent) "Older Versions"
+    $DestinationRoot = Join-Path (Split-Path $repoRoot -Parent) ($projectName + "_Versions")
 }
 
-$projectArchiveRoot = Join-Path $DestinationRoot $projectName
-$destination = Join-Path $projectArchiveRoot $Version
+$destination = Join-Path $DestinationRoot $Version
 
 New-Item -ItemType Directory -Force $destination | Out-Null
 

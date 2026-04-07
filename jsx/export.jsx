@@ -41,6 +41,10 @@ function ebSanitizeName(name) {
     return value || "Active_Sequence";
 }
 
+function ebGetSequenceExportBaseName(sequence) {
+    return ebSanitizeName(ebGetSequenceName(sequence));
+}
+
 function ebEnsureFolder(path) {
     var folder = new Folder(path);
     if (folder.exists) {
@@ -166,8 +170,7 @@ function ebTrackHasClips(track) {
 }
 
 function ebQueueSequence(sequence, outputPath, presetPath, workAreaType) {
-    var jobId = app.encoder.encodeSequence(sequence, ebToFsPath(outputPath), ebToFsPath(presetPath), workAreaType, 0);
-    return jobId;
+    return app.encoder.encodeSequence(sequence, ebToFsPath(outputPath), ebToFsPath(presetPath), workAreaType, 0);
 }
 
 function ebCheckPreset(path, label) {
@@ -177,7 +180,166 @@ function ebCheckPreset(path, label) {
     }
 }
 
-exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, exportMp3, exportWav) {
+function ebWriteTextFile(filePath, contents) {
+    var file = new File(ebToFsPath(filePath));
+    file.encoding = "UTF-8";
+    if (!file.open("w")) {
+        throw new Error("Could not write file: " + filePath);
+    }
+    file.write(contents);
+    file.close();
+}
+
+function ebReadFolderEntries(folderPath) {
+    var folder = new Folder(ebToFsPath(folderPath));
+    if (!folder.exists) {
+        return [];
+    }
+
+    var entries = folder.getFiles();
+    var files = [];
+
+    for (var i = 0; i < entries.length; i++) {
+        if (entries[i] instanceof File) {
+            files.push(entries[i]);
+        }
+    }
+
+    return files;
+}
+
+function ebFindProjectItemByMediaPath(rootItem, mediaPath) {
+    if (!rootItem || !rootItem.children) {
+        return null;
+    }
+
+    for (var i = 0; i < rootItem.children.numItems; i++) {
+        var child = rootItem.children[i];
+        if (!child) {
+            continue;
+        }
+
+        if (child.type === ProjectItemType.BIN) {
+            var nested = ebFindProjectItemByMediaPath(child, mediaPath);
+            if (nested) {
+                return nested;
+            }
+        } else {
+            try {
+                if (child.getMediaPath && child.getMediaPath() === mediaPath) {
+                    return child;
+                }
+            } catch (e) {}
+        }
+    }
+
+    return null;
+}
+
+function ebImportProjectItem(mediaPath) {
+    var fsPath = ebToFsPath(mediaPath);
+    app.project.importFiles([fsPath], false, app.project.rootItem, false);
+    return ebFindProjectItemByMediaPath(app.project.rootItem, fsPath);
+}
+
+function ebEnsureTrackCount(trackCollection, targetIndex) {
+    if (!trackCollection || targetIndex < 0) {
+        return;
+    }
+
+    while (trackCollection.numTracks <= targetIndex) {
+        if (typeof trackCollection.addTrack !== "function") {
+            throw new Error("Premiere could not create enough tracks automatically.");
+        }
+        trackCollection.addTrack();
+    }
+}
+
+function ebCreateTimeAtZero() {
+    var when = new Time();
+    when.seconds = 0;
+    return when;
+}
+
+function ebEscapeForRegex(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function ebGetSequenceMatchInfo(sequence, folderPath) {
+    var baseName = ebGetSequenceExportBaseName(sequence);
+    var files = ebReadFolderEntries(folderPath);
+    var video = null;
+    var audio = [];
+    var videoPattern = new RegExp("^" + ebEscapeForRegex(baseName) + "_BACKUP\\.", "i");
+    var audioPattern = new RegExp("^" + ebEscapeForRegex(baseName) + "_Track([0-9]+)\\.", "i");
+
+    for (var i = 0; i < files.length; i++) {
+        var file = files[i];
+        var name = file.name || "";
+        var audioMatch = name.match(audioPattern);
+
+        if (!video && videoPattern.test(name)) {
+            video = file.fsName;
+            continue;
+        }
+
+        if (audioMatch) {
+            audio.push({
+                path: file.fsName,
+                trackNumber: parseInt(audioMatch[1], 10) || 0,
+                name: name
+            });
+        }
+    }
+
+    audio.sort(function (a, b) {
+        return a.trackNumber - b.trackNumber;
+    });
+
+    return {
+        baseName: baseName,
+        video: video,
+        audio: audio
+    };
+}
+
+function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNumber, audioStartTrackNumber) {
+    if (!sequence) {
+        throw new Error("No active sequence is open in Premiere Pro.");
+    }
+
+    var when = ebCreateTimeAtZero();
+    var notes = [];
+
+    if (videoPath) {
+        ebEnsureTrackCount(sequence.videoTracks, videoTrackNumber - 1);
+        var videoTrack = sequence.videoTracks[videoTrackNumber - 1];
+        var videoItem = ebImportProjectItem(videoPath);
+        if (!videoItem) {
+            throw new Error("Could not import backup video: " + videoPath);
+        }
+        videoTrack.overwriteClip(videoItem, when);
+        notes.push("Aligned backup video to V" + videoTrackNumber + ": " + videoPath);
+    } else {
+        notes.push("No matching BACKUP video file was found.");
+    }
+
+    for (var i = 0; i < audioEntries.length; i++) {
+        var targetTrackNumber = audioStartTrackNumber + i;
+        ebEnsureTrackCount(sequence.audioTracks, targetTrackNumber - 1);
+        var audioTrack = sequence.audioTracks[targetTrackNumber - 1];
+        var audioItem = ebImportProjectItem(audioEntries[i].path);
+        if (!audioItem) {
+            throw new Error("Could not import audio track file: " + audioEntries[i].path);
+        }
+        audioTrack.overwriteClip(audioItem, when);
+        notes.push("Aligned audio to A" + targetTrackNumber + ": " + audioEntries[i].name);
+    }
+
+    return notes;
+}
+
+exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, exportMp3, exportWav, videoTrackNumber, audioStartTrackNumber, saveAlignManifest) {
     try {
         var sequence = ebGetActiveSequence();
         if (!sequence) {
@@ -203,7 +365,7 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
         app.encoder.launchEncoder();
         $.sleep(2500);
 
-        var sequenceName = ebSanitizeName(ebGetSequenceName(sequence));
+        var sequenceName = ebGetSequenceExportBaseName(sequence);
         var originalMuteStates = ebCaptureMuteStates(sequence);
         var notes = [];
         var queuedCount = 0;
@@ -212,7 +374,7 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
         ebSetAllTrackMutes(sequence, 0);
 
         var videoExtension = ebGetExportExtension(sequence, videoPresetPath, ".mp4");
-        var videoPath = ebToFsPath(folderPath + "\\" + sequenceName + "_backup" + videoExtension);
+        var videoPath = ebToFsPath(folderPath + "\\" + sequenceName + "_BACKUP" + videoExtension);
         var videoJobId = ebQueueSequence(sequence, videoPath, videoPresetPath, workAreaType);
         if (!videoJobId || videoJobId === "0") {
             ebRestoreMuteStates(sequence, originalMuteStates);
@@ -231,43 +393,87 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
                 continue;
             }
 
-            var trackLabel = "A" + (i + 1);
-            var safeTrackName = ebSanitizeName(track.name || trackLabel);
+            var exportTrackNumber = i + 1;
 
             if (exportMp3) {
                 ebSetOnlyTrackAudible(sequence, i);
                 var mp3Extension = ebGetExportExtension(sequence, mp3PresetPath, ".mp3");
-                var mp3Path = ebToFsPath(folderPath + "\\" + sequenceName + "_" + trackLabel + "_" + safeTrackName + mp3Extension);
+                var mp3Path = ebToFsPath(folderPath + "\\" + sequenceName + "_Track" + exportTrackNumber + mp3Extension);
                 var mp3JobId = ebQueueSequence(sequence, mp3Path, mp3PresetPath, workAreaType);
                 if (mp3JobId && mp3JobId !== "0") {
                     queuedCount += 1;
                     notes.push("Queued MP3 track export: " + mp3Path);
                 } else {
-                    notes.push("Failed to queue MP3 for " + trackLabel + ". Preset: " + ebToFsPath(mp3PresetPath));
+                    notes.push("Failed to queue MP3 for Track" + exportTrackNumber + ". Preset: " + ebToFsPath(mp3PresetPath));
                 }
             }
 
             if (exportWav) {
                 ebSetOnlyTrackAudible(sequence, i);
                 var wavExtension = ebGetExportExtension(sequence, wavPresetPath, ".wav");
-                var wavPath = ebToFsPath(folderPath + "\\" + sequenceName + "_" + trackLabel + "_" + safeTrackName + wavExtension);
+                var wavPath = ebToFsPath(folderPath + "\\" + sequenceName + "_Track" + exportTrackNumber + wavExtension);
                 var wavJobId = ebQueueSequence(sequence, wavPath, wavPresetPath, workAreaType);
                 if (wavJobId && wavJobId !== "0") {
                     queuedCount += 1;
                     notes.push("Queued WAV track export: " + wavPath);
                 } else {
-                    notes.push("Failed to queue WAV for " + trackLabel + ". Preset: " + ebToFsPath(wavPresetPath));
+                    notes.push("Failed to queue WAV for Track" + exportTrackNumber + ". Preset: " + ebToFsPath(wavPresetPath));
                 }
             }
         }
 
         ebRestoreMuteStates(sequence, originalMuteStates);
 
+        if (saveAlignManifest) {
+            var manifestPath = ebToFsPath(folderPath + "\\" + sequenceName + "_ALIGN.json");
+            var manifest = '{' +
+                '"sequenceName":"' + ebEscape(sequenceName) + '",' +
+                '"folderPath":"' + ebEscape(ebToFsPath(folderPath)) + '",' +
+                '"videoTrackNumber":' + (parseInt(videoTrackNumber, 10) || 1) + ',' +
+                '"audioStartTrackNumber":' + (parseInt(audioStartTrackNumber, 10) || 1) + ',' +
+                '"videoFile":"' + ebEscape(videoPath) + '"' +
+            '}';
+            ebWriteTextFile(manifestPath, manifest);
+            notes.push("Saved alignment manifest: " + manifestPath);
+        }
+
         notes.unshift("Queued jobs: " + queuedCount + ".");
         notes.push("All exports were sent to Adobe Media Encoder queue using sequence In/Out.");
+        notes.push("Expected names: " + sequenceName + "_BACKUP" + videoExtension + " and " + sequenceName + "_TrackN audio files.");
         notes.push("Muted tracks were cleared for the MP4 queue job.");
         notes.push("Track solo is not exposed by Premiere's official scripting API, so clear any solo buttons manually before queuing.");
 
+        return ebResult(true, notes.join("\n"));
+    } catch (e) {
+        return ebResult(false, e.toString());
+    }
+};
+
+exportBackup.alignExistingFolder = function (folderPath, videoTrackNumber, audioStartTrackNumber) {
+    try {
+        var sequence = ebGetActiveSequence();
+        if (!sequence) {
+            return ebResult(false, "No active sequence is open in Premiere Pro.");
+        }
+
+        if (!folderPath) {
+            return ebResult(false, "Choose a folder first.");
+        }
+
+        var matchInfo = ebGetSequenceMatchInfo(sequence, folderPath);
+        if (!matchInfo.video && !matchInfo.audio.length) {
+            return ebResult(false, "No files matching " + matchInfo.baseName + "_BACKUP or " + matchInfo.baseName + "_TrackN were found in the chosen folder.");
+        }
+
+        var notes = ebAlignFilesToSequence(
+            sequence,
+            matchInfo.video,
+            matchInfo.audio,
+            parseInt(videoTrackNumber, 10) || 1,
+            parseInt(audioStartTrackNumber, 10) || 1
+        );
+
+        notes.unshift("Alignment completed at sequence start for " + matchInfo.baseName + ".");
         return ebResult(true, notes.join("\n"));
     } catch (e) {
         return ebResult(false, e.toString());

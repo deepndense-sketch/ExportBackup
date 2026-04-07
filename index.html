@@ -75,6 +75,14 @@ p {
     color: var(--warning);
 }
 
+.meta-row {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    color: var(--muted);
+    font-size: 13px;
+}
+
 .stack {
     display: grid;
     gap: 14px;
@@ -140,6 +148,21 @@ button:disabled {
     margin-top: 3px;
 }
 
+.field {
+    display: grid;
+    gap: 6px;
+}
+
+.field input {
+    width: 100%;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    padding: 12px 14px;
+    font: inherit;
+}
+
 .section-label {
     color: var(--accent);
     font-size: 12px;
@@ -164,6 +187,10 @@ button:disabled {
             <p class="eyebrow">Premiere Pro Extension</p>
             <h1>ExportBackup</h1>
             <p class="muted">Queue a backup package for the active sequence in Adobe Media Encoder.</p>
+        </div>
+        <div class="meta-row">
+            <div>Version: <span id="versionValue">...</span></div>
+            <div>Update: <span id="updateValue">Not checked</span></div>
         </div>
     </section>
 
@@ -191,6 +218,11 @@ button:disabled {
                     <h2>Queued Video Preset</h2>
                     <div class="path-box" id="videoPresetPath"></div>
                 </div>
+
+                <div class="field">
+                    <label for="videoTrackInput">Backup Video Track Number</label>
+                    <input id="videoTrackInput" type="number" min="1" value="1">
+                </div>
             </div>
 
             <div class="stack">
@@ -208,10 +240,54 @@ button:disabled {
                     <input type="checkbox" id="exportWavCheckbox">
                     <span>Queue each audio track as a separate WAV file.</span>
                 </label>
+
+                <div class="field">
+                    <label for="audioStartTrackInput">Aligned Audio Start Track Number</label>
+                    <input id="audioStartTrackInput" type="number" min="1" value="1">
+                </div>
+
+                <label class="option">
+                    <input type="checkbox" id="saveAlignManifestCheckbox" checked>
+                    <span>Save an alignment manifest beside the exports for later recovery.</span>
+                </label>
             </div>
         </div>
 
-        <p class="warning">This tool requires you to set sequence In and Out points before starting. It can clear muted tracks, but Premiere's official scripting API does not provide track solo control.</p>
+        <p class="warning">Exports use sequence In/Out for encoding, but alignment imports always start at the very beginning of the active sequence.</p>
+    </section>
+
+    <section class="card stack">
+        <div>
+            <div class="section-label">Align</div>
+            <h2>Align Existing Export Folder</h2>
+            <p class="muted">Import a matching <code>SequenceName_BACKUP</code> file and any <code>SequenceName_TrackN</code> audio files from a chosen folder onto the active sequence from time 0.</p>
+        </div>
+
+        <div class="row">
+            <button id="chooseAlignFolderButton" class="secondary" onclick="chooseAlignFolder()">Choose Align Folder</button>
+            <button id="alignFolderButton" onclick="alignExistingFolder()">Align Existing Folder</button>
+        </div>
+
+        <div class="two-column">
+            <div class="stack">
+                <div>
+                    <h2>Align Folder</h2>
+                    <div class="path-box" id="alignPath">No folder selected yet.</div>
+                </div>
+            </div>
+
+            <div class="stack">
+                <div class="field">
+                    <label for="alignVideoTrackInput">Aligned Video Track Number</label>
+                    <input id="alignVideoTrackInput" type="number" min="1" value="1">
+                </div>
+
+                <div class="field">
+                    <label for="alignAudioStartTrackInput">Aligned Audio Start Track Number</label>
+                    <input id="alignAudioStartTrackInput" type="number" min="1" value="1">
+                </div>
+            </div>
+        </div>
     </section>
 
     <section class="card stack">

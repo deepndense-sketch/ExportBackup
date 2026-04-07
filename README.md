@@ -11,22 +11,33 @@ This extension is intended to:
 - queue an H.264 1080p MP4 backup to Adobe Media Encoder
 - unmute all audio tracks for the MP4 queue job
 - optionally queue each audio track as a separate MP3 and/or WAV export
+- save files using `SequenceName_BACKUP` and `SequenceName_TrackN` naming
+- align matching exported files back onto the active sequence from sequence start
 
 ## Project Structure
 
 ```text
 ExportBackup/
   CSXS/manifest.xml
+  deploy_extension.bat
   js/CSInterface.js
   js/main.js
   jsx/export.jsx
   index.html
+  version.json
   .gitignore
 ```
 
 ## Current Status
 
 This project now uses Premiere Pro's `app.encoder.encodeSequence()` workflow to send jobs to Adobe Media Encoder.
+
+The panel now also includes:
+
+- local version display from `version.json`
+- GitHub update check against the repository `main` branch
+- manual folder-based alignment for files named like `SequenceName_BACKUP.mp4` and `SequenceName_Track1.wav`
+- a deployment batch file for copying the extension into Adobe's CEP extensions folder
 
 ## Presets Used
 
@@ -38,3 +49,5 @@ This project now uses Premiere Pro's `app.encoder.encodeSequence()` workflow to 
 ## Important Limitation
 
 Premiere Pro's official scripting API supports muting audio tracks, but does not document track solo control. This extension can clear mutes for the MP4 queue job, but any solo state should be cleared manually in Premiere before running the tool.
+
+Track deletion is also not supported reliably through Premiere's official scripting API, so alignment works by placing files onto user-selected target tracks rather than deleting existing tracks.

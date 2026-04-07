@@ -836,6 +836,6 @@ document.addEventListener("DOMContentLoaded", () => {
     checkForUpdates();
     document.getElementById("videoPresetPath").textContent = videoPresetPath;
     document.getElementById("audioPresetPath").textContent = `MP3: ${MP3_PRESET_PATH}\nWAV: ${WAV_PRESET_PATH}`;
-    setStatus("Waiting to start.");
+    setStatus("Ready.");
     refreshAlignmentDefaults(false);
 });

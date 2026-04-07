@@ -405,6 +405,37 @@ function ebValidateAvailableTracks(sequence, hasVideo, audioCount, videoTrackNum
     throw new Error(lines.join("\n"));
 }
 
+function ebTryAddAudioTracks(sequence, requiredAudioCount) {
+    var currentAudioCount = ebGetTrackCount(sequence.audioTracks);
+    var missingAudioCount = Math.max(0, requiredAudioCount - currentAudioCount);
+
+    if (missingAudioCount < 1) {
+        return 0;
+    }
+
+    try {
+        app.enableQE();
+        if (!qe || !qe.project || !qe.project.getActiveSequence) {
+            return 0;
+        }
+
+        var qeSequence = qe.project.getActiveSequence();
+        if (!qeSequence || !qeSequence.addTracks) {
+            return 0;
+        }
+
+        var addAfterAudioIndex = Math.max(0, currentAudioCount - 1);
+
+        // QE DOM is unsupported, but this is the only practical path to append
+        // audio tracks during alignment when the official DOM cannot create them.
+        qeSequence.addTracks(0, 0, missingAudioCount, 3, addAfterAudioIndex);
+    } catch (e) {
+        return 0;
+    }
+
+    return Math.max(0, ebGetTrackCount(sequence.audioTracks) - currentAudioCount);
+}
+
 function ebValidateEmptyTargetTracks(sequence, hasVideo, audioCount, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber) {
     var issues = [];
 
@@ -451,6 +482,23 @@ function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNum
     var when = ebCreateTimeAtZero();
     var notes = [];
     var hasVideo = !!videoPath;
+    var requiredAudioCount = 0;
+
+    if (hasVideo && videoAudioTrackNumber && videoAudioTrackNumber > 0) {
+        requiredAudioCount = Math.max(requiredAudioCount, parseInt(videoAudioTrackNumber, 10) || 1);
+    }
+
+    if (audioEntries.length > 0) {
+        requiredAudioCount = Math.max(
+            requiredAudioCount,
+            (parseInt(audioStartTrackNumber, 10) || 1) + audioEntries.length - 1
+        );
+    }
+
+    var addedAudioTracks = ebTryAddAudioTracks(sequence, requiredAudioCount);
+    if (addedAudioTracks > 0) {
+        notes.push("Added " + addedAudioTracks + " audio track(s) automatically for alignment.");
+    }
 
     ebValidateAvailableTracks(
         sequence,

@@ -13,6 +13,8 @@ const ALIGN_FOLDER_STORAGE_KEY = "exportbackup.alignFolder";
 const PRESET_SECTION_VISIBLE_STORAGE_KEY = "exportbackup.presetSectionVisible";
 const BACKUP_VIDEO_TRACK_STORAGE_KEY = "exportbackup.backupVideoTrack";
 const ALIGN_VIDEO_TRACK_STORAGE_KEY = "exportbackup.alignVideoTrack";
+const ALIGN_SORT_PROJECT_FILES_STORAGE_KEY = "exportbackup.alignSortProjectFiles";
+const ALIGN_SORT_SEQUENCE_SELECTIONS_STORAGE_KEY = "exportbackup.alignSortSequenceSelections";
 const AUDIO_FORMAT_STORAGE_KEY = "exportbackup.audioFormat";
 
 const DEFAULT_BACKUP_VIDEO_TRACK = 5;
@@ -33,6 +35,7 @@ let remoteVersion = null;
 let presetSectionVisible = true;
 let exportMonitorState = null;
 let exportSelectionState = null;
+let sequenceSortState = null;
 
 function getExtensionRootPath() {
     try {
@@ -118,6 +121,7 @@ function setBusyState(nextBusy) {
     document.getElementById("chooseAlignFolderButton").disabled = nextBusy;
     document.getElementById("alignFolderButton").disabled = nextBusy;
     document.getElementById("alignSkipVideoCheckbox").disabled = nextBusy;
+    document.getElementById("alignSortProjectFilesCheckbox").disabled = nextBusy;
     document.getElementById("refreshExportSelectionButton").disabled = nextBusy;
     document.getElementById("updateButton").disabled = nextBusy;
 
@@ -353,6 +357,30 @@ function bindAudioFormatInputs() {
                 saveSelectedAudioFormat(input.value);
             }
         });
+    });
+}
+
+function bindAlignOptions() {
+    const sortCheckbox = document.getElementById("alignSortProjectFilesCheckbox");
+    if (!sortCheckbox) {
+        return;
+    }
+
+    try {
+        sortCheckbox.checked = localStorage.getItem(ALIGN_SORT_PROJECT_FILES_STORAGE_KEY) === "true";
+    } catch (error) {
+        sortCheckbox.checked = false;
+    }
+
+    sortCheckbox.addEventListener("change", () => {
+        try {
+            localStorage.setItem(ALIGN_SORT_PROJECT_FILES_STORAGE_KEY, sortCheckbox.checked ? "true" : "false");
+        } catch (error) {}
+
+        setSequenceSortListDisabled(!sortCheckbox.checked);
+        if (sortCheckbox.checked && !sequenceSortState) {
+            refreshSequenceSortList();
+        }
     });
 }
 
@@ -777,6 +805,15 @@ async function getExportSelectionInfo() {
     return parseHostResult(result) || { ok: false, message: result || "Could not read export selection." };
 }
 
+async function getSequenceSortInfo() {
+    if (!(await ensureHostLoaded())) {
+        return { ok: false, message: "Could not load Premiere host script." };
+    }
+
+    const result = await callHost("exportBackup.getSequenceSortInfo()");
+    return parseHostResult(result) || { ok: false, message: result || "Could not read sequence list." };
+}
+
 function renderExportSelectionList(selectionInfo) {
     const container = document.getElementById("exportSelectionList");
     if (!container) {
@@ -847,6 +884,122 @@ async function refreshExportSelection() {
     renderExportSelectionList({ ok: true, items: [], message: "Reading active sequence tracks..." });
     const selectionInfo = await getExportSelectionInfo();
     renderExportSelectionList(selectionInfo);
+}
+
+function getSavedSequenceSortSelections() {
+    try {
+        return JSON.parse(localStorage.getItem(ALIGN_SORT_SEQUENCE_SELECTIONS_STORAGE_KEY) || "{}");
+    } catch (error) {
+        return {};
+    }
+}
+
+function saveSequenceSortSelections(selectionMap) {
+    try {
+        localStorage.setItem(ALIGN_SORT_SEQUENCE_SELECTIONS_STORAGE_KEY, JSON.stringify(selectionMap || {}));
+    } catch (error) {}
+}
+
+function getSequenceSortListContainer() {
+    return document.getElementById("sequenceSortList");
+}
+
+function setSequenceSortListDisabled(disabled) {
+    const container = getSequenceSortListContainer();
+    if (!container) {
+        return;
+    }
+
+    container.classList.toggle("is-disabled", !!disabled);
+    Array.prototype.slice.call(container.querySelectorAll("input[type='checkbox']")).forEach((input) => {
+        if (input.dataset.locked === "true") {
+            input.disabled = true;
+            return;
+        }
+
+        input.disabled = !!disabled;
+    });
+}
+
+function renderSequenceSortList(sequenceInfo) {
+    const container = getSequenceSortListContainer();
+    if (!container) {
+        return;
+    }
+
+    if (!sequenceInfo || !sequenceInfo.ok) {
+        container.innerHTML = `<div class="small-note">${(sequenceInfo && sequenceInfo.message) || "Could not read project sequences."}</div>`;
+        setSequenceSortListDisabled(true);
+        sequenceSortState = null;
+        return;
+    }
+
+    sequenceSortState = sequenceInfo;
+    const items = Array.isArray(sequenceInfo.items) ? sequenceInfo.items : [];
+    const savedSelections = getSavedSequenceSortSelections();
+
+    if (!items.length) {
+        container.innerHTML = "<div class=\"small-note\">No project sequences were found.</div>";
+        setSequenceSortListDisabled(true);
+        return;
+    }
+
+    container.innerHTML = items.map((item, index) => {
+        const checkboxId = `sequenceSortItem_${index}`;
+        const savedValue = savedSelections[item.key];
+        const selected = typeof savedValue === "boolean" ? savedValue : item.selected !== false;
+        const checked = selected ? "checked" : "";
+        const disabled = item.locked ? "disabled" : "";
+        const detail = item.isActive
+            ? "Active sequence. Left unchecked by default."
+            : "Checked by default. Untick it if you want it to stay where it is.";
+
+        return (
+            `<label class="selection-item" for="${checkboxId}">` +
+                `<input type="checkbox" id="${checkboxId}" data-sequence-key="${item.key}" data-locked="${item.locked ? "true" : "false"}" ${checked} ${disabled}>` +
+                `<span>` +
+                    `<strong>${item.label}</strong>` +
+                    `<small>${detail}</small>` +
+                `</span>` +
+            `</label>`
+        );
+    }).join("");
+
+    Array.prototype.slice.call(container.querySelectorAll("input[type='checkbox'][data-sequence-key]")).forEach((input) => {
+        if (input.dataset.locked === "true") {
+            return;
+        }
+
+        input.addEventListener("change", () => {
+            const selections = getSavedSequenceSortSelections();
+            selections[input.dataset.sequenceKey] = !!input.checked;
+            saveSequenceSortSelections(selections);
+        });
+    });
+
+    setSequenceSortListDisabled(!document.getElementById("alignSortProjectFilesCheckbox").checked);
+}
+
+function getSelectedSequenceSortKeys() {
+    const container = getSequenceSortListContainer();
+    if (!container) {
+        return [];
+    }
+
+    return Array.prototype.slice.call(container.querySelectorAll("input[type='checkbox'][data-sequence-key]:checked"))
+        .map((input) => input.getAttribute("data-sequence-key"))
+        .filter((value) => !!value);
+}
+
+async function refreshSequenceSortList() {
+    const container = getSequenceSortListContainer();
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = "<div class=\"small-note\">Reading project sequences...</div>";
+    const sequenceInfo = await getSequenceSortInfo();
+    renderSequenceSortList(sequenceInfo);
 }
 
 function parseTrackNumberFromFileName(name, baseName) {
@@ -1115,9 +1268,12 @@ async function runAlignmentFlow(folderPath, options) {
         );
         saveAlignVideoTrack(backupVideoTrackNumber);
         const skipBackupVideo = settings.skipVideo === true || document.getElementById("alignSkipVideoCheckbox").checked;
+        const sortProjectFiles = settings.sortProjectFiles === true || document.getElementById("alignSortProjectFilesCheckbox").checked;
+        const selectedSequenceKeys = sortProjectFiles ? getSelectedSequenceSortKeys() : [];
         const resolvedVideoPath = skipBackupVideo ? "" : (matchInfo.videoPath || "");
         const audioJson = JSON.stringify(matchInfo.audio);
-        const script = `exportBackup.alignMappedFiles("${escapeForEvalScript(resolvedVideoPath)}","${escapeForEvalScript(audioJson)}",${backupVideoTrackNumber})`;
+        const selectedSequenceKeysJson = JSON.stringify(selectedSequenceKeys);
+        const script = `exportBackup.alignMappedFiles("${escapeForEvalScript(resolvedVideoPath)}","${escapeForEvalScript(audioJson)}",${backupVideoTrackNumber},${sortProjectFiles},"${escapeForEvalScript(selectedSequenceKeysJson)}")`;
         const result = await callHost(script);
         const parsed = parseHostResult(result);
 
@@ -1220,6 +1376,7 @@ async function monitorExportCompletion() {
         await runAlignmentFlow(state.manifest.folderPath, {
             manifest: state.manifest,
             skipVideo: false,
+            sortProjectFiles: false,
             autoTriggered: true
         });
         return;
@@ -1418,6 +1575,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadSavedPaths();
     loadSavedUiState();
     bindAudioFormatInputs();
+    bindAlignOptions();
     markBackupInputsDirty();
     loadSavedBackupSettings();
     setPresetSectionVisibility(presetSectionVisible);
@@ -1428,4 +1586,5 @@ document.addEventListener("DOMContentLoaded", () => {
     setStatus("Ready.");
     refreshSuggestedBackupTrack(false);
     refreshExportSelection();
+    refreshSequenceSortList();
 });

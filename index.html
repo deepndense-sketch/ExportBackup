@@ -335,10 +335,6 @@ button:disabled {
 .selection-list.is-disabled {
     opacity: 0.55;
 }
-
-.is-hidden-visibility {
-    display: none;
-}
 </style>
 <script src="js/CSInterface.js"></script>
 <script src="js/main.js"></script>
@@ -379,13 +375,6 @@ button:disabled {
                     <input type="checkbox" id="alignSortProjectFilesCheckbox">
                     <span>Sort loose non-sequence project files after backup import.</span>
                 </label>
-
-                <div class="field is-hidden-visibility" id="sequenceSortField">
-                    <label>Sequences To Sort</label>
-                    <div id="sequenceSortList" class="selection-list">
-                        <div class="small-note">Turn on sorting to choose which sequences can be moved into the sequence bin. The active sequence stays unchecked by default.</div>
-                    </div>
-                </div>
 
                 <div class="field">
                     <label for="alignVideoTrackInput">Backup MP4 video track for this manual align</label>

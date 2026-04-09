@@ -424,12 +424,6 @@ function ebGetOrganizerBinNameForItem(item) {
     };
 
     try {
-        if (item && item.isSequence && item.isSequence()) {
-            return "SEQUENCES";
-        }
-    } catch (e) {}
-
-    try {
         mediaPath = item && item.getMediaPath ? item.getMediaPath() : "";
     } catch (e2) {
         mediaPath = "";
@@ -452,63 +446,12 @@ function ebGetOrganizerBinNameForItem(item) {
     return "OTHER";
 }
 
-function ebGetProjectSequenceSortItems() {
-    var root = app.project && app.project.rootItem ? app.project.rootItem : null;
-    var activeSequence = ebGetActiveSequence();
-    var items = [];
-    var i;
-
-    if (!root || !root.children) {
-        return items;
-    }
-
-    for (i = 0; i < root.children.numItems; i++) {
-        var child = root.children[i];
-        var isSequence = false;
-
-        if (!child || child.type === ProjectItemType.BIN) {
-            continue;
-        }
-
-        try {
-            isSequence = child.isSequence && child.isSequence();
-        } catch (e) {
-            isSequence = false;
-        }
-
-        if (!isSequence) {
-            continue;
-        }
-
-        items.push({
-            key: child.nodeId || child.name,
-            label: child.name,
-            isActive: !!(activeSequence && child.name === ebGetSequenceName(activeSequence)),
-            selected: !(activeSequence && child.name === ebGetSequenceName(activeSequence)),
-            locked: !!(activeSequence && child.name === ebGetSequenceName(activeSequence))
-        });
-    }
-
-    items.sort(function (a, b) {
-        if (a.isActive && !b.isActive) {
-            return -1;
-        }
-        if (!a.isActive && b.isActive) {
-            return 1;
-        }
-        return a.label.toLowerCase() > b.label.toLowerCase() ? 1 : -1;
-    });
-
-    return items;
-}
-
-function ebOrganizeLooseRootItems(selectedSequenceKeys) {
+function ebOrganizeLooseRootItems() {
     var root = app.project && app.project.rootItem ? app.project.rootItem : null;
     var organizerRoot;
     var itemsToMove = [];
     var movedCounts = {};
     var notes = [];
-    var sequenceKeyMap = {};
     var i;
 
     if (!root || !root.children) {
@@ -535,7 +478,6 @@ function ebOrganizeLooseRootItems(selectedSequenceKeys) {
         }
 
         if (isSequence) {
-            sequenceKeyMap[child.nodeId || child.name] = child;
             continue;
         }
 
@@ -565,29 +507,6 @@ function ebOrganizeLooseRootItems(selectedSequenceKeys) {
 
     if (!notes.length) {
         notes.push("No loose root items needed organizing.");
-    }
-
-    if (selectedSequenceKeys && selectedSequenceKeys.length) {
-        var sequenceBin = ebEnsureBin(organizerRoot, "SEQUENCES");
-        var movedSequences = 0;
-
-        if (sequenceBin) {
-            for (i = 0; i < selectedSequenceKeys.length; i++) {
-                var sequenceItem = sequenceKeyMap[selectedSequenceKeys[i]];
-                if (!sequenceItem || !sequenceItem.moveBin) {
-                    continue;
-                }
-
-                try {
-                    sequenceItem.moveBin(sequenceBin);
-                    movedSequences += 1;
-                } catch (moveSequenceError) {}
-            }
-        }
-
-        if (movedSequences > 0) {
-            notes.push("Organized " + movedSequences + " sequence item(s) into SEQUENCES.");
-        }
     }
 
     return notes;
@@ -631,16 +550,6 @@ exportBackup.getExportSelectionInfo = function () {
         return ebResult(true, items.length > 1 ? "Choose which backup files should be queued." : "Choose which backup files should be queued.", {
             sequenceName: ebGetSequenceName(sequence),
             items: items
-        });
-    } catch (e) {
-        return ebResult(false, e.toString());
-    }
-};
-
-exportBackup.getSequenceSortInfo = function () {
-    try {
-        return ebResult(true, "Choose which root-level sequences can be sorted.", {
-            items: ebGetProjectSequenceSortItems()
         });
     } catch (e) {
         return ebResult(false, e.toString());
@@ -809,7 +718,7 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
     }
 };
 
-exportBackup.alignMappedFiles = function (videoPath, audioJson, backupVideoTrackNumber, sortProjectFiles, selectedSequenceKeysJson) {
+exportBackup.alignMappedFiles = function (videoPath, audioJson, backupVideoTrackNumber, sortProjectFiles) {
     try {
         var sequence = ebGetActiveSequence();
         if (!sequence) {
@@ -841,16 +750,7 @@ exportBackup.alignMappedFiles = function (videoPath, audioJson, backupVideoTrack
         var notes = [];
         var importBin = ebGetImportBin(sequence);
         var organizerNotes;
-        var selectedSequenceKeys = [];
         var i;
-
-        if (selectedSequenceKeysJson) {
-            try {
-                selectedSequenceKeys = JSON.parse(selectedSequenceKeysJson);
-            } catch (eJson) {
-                selectedSequenceKeys = [];
-            }
-        }
 
         if (videoPath) {
             finalRequiredAudioTrack = Math.max(finalRequiredAudioTrack, backupVideoAudioTrackNumber);
@@ -887,7 +787,7 @@ exportBackup.alignMappedFiles = function (videoPath, audioJson, backupVideoTrack
         }
 
         if (sortProjectFiles) {
-            organizerNotes = ebOrganizeLooseRootItems(selectedSequenceKeys);
+            organizerNotes = ebOrganizeLooseRootItems();
             for (i = 0; i < organizerNotes.length; i++) {
                 notes.push(organizerNotes[i]);
             }

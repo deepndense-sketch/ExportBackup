@@ -377,11 +377,13 @@ function bindAlignOptions() {
             localStorage.setItem(ALIGN_SORT_PROJECT_FILES_STORAGE_KEY, sortCheckbox.checked ? "true" : "false");
         } catch (error) {}
 
-        setSequenceSortListDisabled(!sortCheckbox.checked);
+        updateSequenceSortVisibility();
         if (sortCheckbox.checked && !sequenceSortState) {
             refreshSequenceSortList();
         }
     });
+
+    updateSequenceSortVisibility();
 }
 
 async function refreshSuggestedBackupTrack(force) {
@@ -904,6 +906,22 @@ function getSequenceSortListContainer() {
     return document.getElementById("sequenceSortList");
 }
 
+function getSequenceSortField() {
+    return document.getElementById("sequenceSortField");
+}
+
+function updateSequenceSortVisibility() {
+    const field = getSequenceSortField();
+    const sortCheckbox = document.getElementById("alignSortProjectFilesCheckbox");
+    const visible = !!(field && sortCheckbox && sortCheckbox.checked);
+
+    if (field) {
+        field.classList.toggle("is-hidden-visibility", !visible);
+    }
+
+    setSequenceSortListDisabled(!visible);
+}
+
 function setSequenceSortListDisabled(disabled) {
     const container = getSequenceSortListContainer();
     if (!container) {
@@ -977,7 +995,7 @@ function renderSequenceSortList(sequenceInfo) {
         });
     });
 
-    setSequenceSortListDisabled(!document.getElementById("alignSortProjectFilesCheckbox").checked);
+    updateSequenceSortVisibility();
 }
 
 function getSelectedSequenceSortKeys() {

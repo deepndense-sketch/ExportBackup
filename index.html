@@ -302,26 +302,42 @@ button:disabled {
 .selection-item {
     display: flex;
     gap: 10px;
-    align-items: flex-start;
+    align-items: center;
     color: var(--text);
     font-size: 13px;
 }
 
+.selection-item input {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
 .selection-item span {
-    display: grid;
-    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+    display: block;
 }
 
 .selection-item strong {
     font-size: 13px;
+    display: block;
+    line-height: 1.35;
+    word-break: break-word;
 }
 
 .selection-item small {
     color: var(--muted);
+    display: block;
+    line-height: 1.35;
+    margin-top: 2px;
 }
 
 .selection-list.is-disabled {
     opacity: 0.55;
+}
+
+.is-hidden-visibility {
+    display: none;
 }
 </style>
 <script src="js/CSInterface.js"></script>
@@ -364,9 +380,9 @@ button:disabled {
                     <span>Sort loose non-sequence project files after backup import.</span>
                 </label>
 
-                <div class="field">
+                <div class="field is-hidden-visibility" id="sequenceSortField">
                     <label>Sequences To Sort</label>
-                    <div id="sequenceSortList" class="selection-list is-disabled">
+                    <div id="sequenceSortList" class="selection-list">
                         <div class="small-note">Turn on sorting to choose which sequences can be moved into the sequence bin. The active sequence stays unchecked by default.</div>
                     </div>
                 </div>

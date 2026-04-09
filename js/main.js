@@ -11,9 +11,15 @@ const WAV_PRESET_STORAGE_KEY = "exportbackup.wavPresetPath";
 const EXPORT_FOLDER_STORAGE_KEY = "exportbackup.exportFolder";
 const ALIGN_FOLDER_STORAGE_KEY = "exportbackup.alignFolder";
 const PRESET_SECTION_VISIBLE_STORAGE_KEY = "exportbackup.presetSectionVisible";
-const DEFAULT_ALIGN_VIDEO_TRACK = 5;
-const DEFAULT_ALIGN_VIDEO_AUDIO_TRACK = 1;
-const DEFAULT_ALIGN_AUDIO_START_TRACK = 2;
+const BACKUP_VIDEO_TRACK_STORAGE_KEY = "exportbackup.backupVideoTrack";
+const ALIGN_VIDEO_TRACK_STORAGE_KEY = "exportbackup.alignVideoTrack";
+const AUDIO_FORMAT_STORAGE_KEY = "exportbackup.audioFormat";
+
+const DEFAULT_BACKUP_VIDEO_TRACK = 5;
+const EXPORT_MANIFEST_SUFFIX = "_ExportBackupMap.json";
+const EXPORT_MONITOR_INTERVAL_MS = 5000;
+const EXPORT_MONITOR_STABLE_PASSES = 2;
+const EXPORT_MONITOR_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
 let exportFolder = null;
 let alignFolder = null;
@@ -25,6 +31,8 @@ let wavPresetPath = "";
 let localVersion = "unknown";
 let remoteVersion = null;
 let presetSectionVisible = true;
+let exportMonitorState = null;
+let exportSelectionState = null;
 
 function getExtensionRootPath() {
     try {
@@ -83,7 +91,24 @@ function togglePresetSection() {
     setPresetSectionVisibility(!presetSectionVisible);
 }
 
+function getAudioFormatInputs() {
+    return {
+        mp3: document.getElementById("audioFormatMp3"),
+        wav: document.getElementById("audioFormatWav")
+    };
+}
+
+function getBackupVideoTrackInput() {
+    return document.getElementById("exportVideoTrackInput");
+}
+
+function getAlignVideoTrackInput() {
+    return document.getElementById("alignVideoTrackInput");
+}
+
 function setBusyState(nextBusy) {
+    const audioInputs = getAudioFormatInputs();
+
     busy = nextBusy;
     document.getElementById("chooseFolderButton").disabled = nextBusy;
     document.getElementById("chooseVideoPresetButton").disabled = nextBusy;
@@ -92,7 +117,23 @@ function setBusyState(nextBusy) {
     document.getElementById("exportButton").disabled = nextBusy;
     document.getElementById("chooseAlignFolderButton").disabled = nextBusy;
     document.getElementById("alignFolderButton").disabled = nextBusy;
+    document.getElementById("alignSkipVideoCheckbox").disabled = nextBusy;
+    document.getElementById("refreshExportSelectionButton").disabled = nextBusy;
     document.getElementById("updateButton").disabled = nextBusy;
+
+    Object.keys(audioInputs).forEach((key) => {
+        if (audioInputs[key]) {
+            audioInputs[key].disabled = nextBusy;
+        }
+    });
+
+    if (getBackupVideoTrackInput()) {
+        getBackupVideoTrackInput().disabled = nextBusy;
+    }
+
+    if (getAlignVideoTrackInput()) {
+        getAlignVideoTrackInput().disabled = nextBusy;
+    }
 }
 
 function setUpdateButton(label, isUpdateAvailable) {
@@ -160,12 +201,25 @@ function fileExists(filePath) {
     }
 }
 
+function readJsonFile(filePath) {
+    try {
+        return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    } catch (error) {
+        return null;
+    }
+}
+
 function getPositiveIntValue(elementId, fallbackValue) {
-    const raw = document.getElementById(elementId).value;
-    const parsed = parseInt(raw, 10);
+    const element = document.getElementById(elementId);
+    if (!element) {
+        return fallbackValue;
+    }
+
+    const parsed = parseInt(element.value, 10);
     if (!parsed || parsed < 1) {
         return fallbackValue;
     }
+
     return parsed;
 }
 
@@ -175,123 +229,156 @@ function sanitizeSequenceName(value) {
         .trim() || "Active_Sequence";
 }
 
-function getAlignmentDefaultValues() {
-    return {
-        videoTrackNumber: DEFAULT_ALIGN_VIDEO_TRACK,
-        videoAudioTrackNumber: DEFAULT_ALIGN_VIDEO_AUDIO_TRACK,
-        audioStartTrackNumber: DEFAULT_ALIGN_AUDIO_START_TRACK
-    };
+function getManifestPath(folderPath, baseName) {
+    return path.join(folderPath, `${sanitizeSequenceName(baseName)}${EXPORT_MANIFEST_SUFFIX}`);
 }
 
-function getAlignmentInputs() {
-    return {
-        videoTrack: document.getElementById("alignVideoTrackInput"),
-        videoAudioTrack: document.getElementById("alignVideoAudioTrackInput"),
-        audioStartTrack: document.getElementById("alignAudioStartTrackInput")
-    };
+function getSelectedAudioFormat() {
+    const audioInputs = getAudioFormatInputs();
+    return audioInputs.wav && audioInputs.wav.checked ? "wav" : "mp3";
 }
 
-function getBackupInputs() {
-    return {
-        videoTrack: document.getElementById("exportVideoTrackInput")
-    };
+function setSelectedAudioFormat(format) {
+    const audioInputs = getAudioFormatInputs();
+    const resolved = String(format || "").toLowerCase() === "wav" ? "wav" : "mp3";
+
+    if (audioInputs.mp3) {
+        audioInputs.mp3.checked = resolved === "mp3";
+    }
+
+    if (audioInputs.wav) {
+        audioInputs.wav.checked = resolved === "wav";
+    }
+}
+
+function saveSelectedAudioFormat(format) {
+    setSelectedAudioFormat(format);
+
+    try {
+        localStorage.setItem(AUDIO_FORMAT_STORAGE_KEY, getSelectedAudioFormat());
+    } catch (error) {}
+}
+
+function loadSavedUiState() {
+    try {
+        const saved = localStorage.getItem(PRESET_SECTION_VISIBLE_STORAGE_KEY);
+        if (saved === "true") {
+            presetSectionVisible = true;
+            return;
+        }
+    } catch (error) {}
+
+    presetSectionVisible = false;
+}
+
+function saveBackupVideoTrack(trackNumber) {
+    try {
+        localStorage.setItem(BACKUP_VIDEO_TRACK_STORAGE_KEY, String(trackNumber));
+    } catch (error) {}
+}
+
+function saveAlignVideoTrack(trackNumber) {
+    try {
+        localStorage.setItem(ALIGN_VIDEO_TRACK_STORAGE_KEY, String(trackNumber));
+    } catch (error) {}
 }
 
 function applyBackupDefaults(defaults, force) {
-    const values = defaults || getAlignmentDefaultValues();
-    const inputs = getBackupInputs();
-
-    if (!inputs.videoTrack) {
+    const backupTrackInput = getBackupVideoTrackInput();
+    if (!backupTrackInput) {
         return;
     }
 
-    if (force || inputs.videoTrack.dataset.userEdited !== "true") {
-        inputs.videoTrack.value = String(values.videoTrackNumber);
-        inputs.videoTrack.dataset.autoValue = String(values.videoTrackNumber);
+    const value = Math.max(
+        1,
+        parseInt((defaults && defaults.videoTrackNumber) || DEFAULT_BACKUP_VIDEO_TRACK, 10) || DEFAULT_BACKUP_VIDEO_TRACK
+    );
+
+    if (force || backupTrackInput.dataset.userEdited !== "true") {
+        backupTrackInput.value = String(value);
+        backupTrackInput.dataset.autoValue = String(value);
+        saveBackupVideoTrack(value);
     }
 }
 
-function applyAlignmentDefaults(defaults, force) {
-    const values = defaults || getAlignmentDefaultValues();
-    const inputs = getAlignmentInputs();
+function applyAlignDefaults(defaults, force) {
+    const alignTrackInput = getAlignVideoTrackInput();
+    if (!alignTrackInput) {
+        return;
+    }
 
-    [
-        { element: inputs.videoTrack, value: values.videoTrackNumber },
-        { element: inputs.videoAudioTrack, value: values.videoAudioTrackNumber },
-        { element: inputs.audioStartTrack, value: values.audioStartTrackNumber }
-    ].forEach((entry) => {
-        if (!entry.element) {
-            return;
-        }
+    const value = Math.max(
+        1,
+        parseInt((defaults && defaults.videoTrackNumber) || DEFAULT_BACKUP_VIDEO_TRACK, 10) || DEFAULT_BACKUP_VIDEO_TRACK
+    );
 
-        const parsedValue = parseInt(entry.value, 10) || 0;
-        if (parsedValue < 1) {
-            return;
-        }
-
-        if (force || entry.element.dataset.userEdited !== "true") {
-            entry.element.value = String(parsedValue);
-            entry.element.dataset.autoValue = String(parsedValue);
-        }
-    });
+    if (force || alignTrackInput.dataset.userEdited !== "true") {
+        alignTrackInput.value = String(value);
+        alignTrackInput.dataset.autoValue = String(value);
+        saveAlignVideoTrack(value);
+    }
 }
 
 function markBackupInputsDirty() {
-    const inputs = getBackupInputs();
+    const backupTrackInput = getBackupVideoTrackInput();
+    const alignTrackInput = getAlignVideoTrackInput();
+    if (!backupTrackInput) {
+        return;
+    }
 
-    [inputs.videoTrack].forEach((input) => {
+    backupTrackInput.addEventListener("input", () => {
+        backupTrackInput.dataset.userEdited = "true";
+        saveBackupVideoTrack(getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK));
+    });
+
+    if (alignTrackInput) {
+        alignTrackInput.addEventListener("input", () => {
+            alignTrackInput.dataset.userEdited = "true";
+            saveAlignVideoTrack(getPositiveIntValue("alignVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK));
+        });
+    }
+}
+
+function bindAudioFormatInputs() {
+    const audioInputs = getAudioFormatInputs();
+
+    Object.keys(audioInputs).forEach((key) => {
+        const input = audioInputs[key];
         if (!input) {
             return;
         }
 
-        input.addEventListener("input", () => {
-            input.dataset.userEdited = "true";
+        input.addEventListener("change", () => {
+            if (input.checked) {
+                saveSelectedAudioFormat(input.value);
+            }
         });
     });
 }
 
-function markAlignmentInputsDirty() {
-    Object.values(getAlignmentInputs()).forEach((input) => {
-        if (!input) {
-            return;
-        }
-
-        input.addEventListener("input", () => {
-            input.dataset.userEdited = "true";
-        });
-    });
-}
-
-async function refreshAlignmentDefaults(force) {
-    const fallback = getAlignmentDefaultValues();
+async function refreshSuggestedBackupTrack(force) {
+    const fallback = { videoTrackNumber: DEFAULT_BACKUP_VIDEO_TRACK };
 
     if (!(await ensureHostLoaded())) {
         applyBackupDefaults(fallback, force);
-        applyAlignmentDefaults(fallback, force);
+        applyAlignDefaults(fallback, force);
         return;
     }
 
     const result = await callHost("exportBackup.getAlignmentDefaults()");
     const parsed = parseHostResult(result);
-
     if (!parsed || !parsed.ok) {
         applyBackupDefaults(fallback, force);
-        applyAlignmentDefaults(fallback, force);
+        applyAlignDefaults(fallback, force);
         return;
     }
 
-    const suggestedDefaults = {
-        videoTrackNumber: parsed.suggestedVideoTrack || DEFAULT_ALIGN_VIDEO_TRACK,
-        videoAudioTrackNumber: parsed.suggestedVideoAudioTrack || DEFAULT_ALIGN_VIDEO_AUDIO_TRACK,
-        audioStartTrackNumber: parsed.suggestedAudioStartTrack || DEFAULT_ALIGN_AUDIO_START_TRACK
+    const defaults = {
+        videoTrackNumber: parsed.suggestedVideoTrack || DEFAULT_BACKUP_VIDEO_TRACK
     };
 
-    applyBackupDefaults(suggestedDefaults, force);
-    applyAlignmentDefaults(suggestedDefaults, force);
-}
-
-function getManifestAlignmentDefaults(matchInfo) {
-    return null;
+    applyBackupDefaults(defaults, force);
+    applyAlignDefaults(defaults, force);
 }
 
 function getTempUpdaterScriptPath() {
@@ -447,9 +534,8 @@ async function monitorUpdaterCompletion() {
 
         if (fileExists(resultPath)) {
             try {
-                const raw = fs.readFileSync(resultPath, "utf8");
-                const parsed = JSON.parse(raw);
-                if (parsed.ok) {
+                const parsed = readJsonFile(resultPath);
+                if (parsed && parsed.ok) {
                     readVersionInfo(true);
                     await checkForUpdates();
                     setStatus(`Update complete.\nInstalled version: ${localVersion}\nRestart Premiere Pro if the panel was already open.`);
@@ -457,8 +543,8 @@ async function monitorUpdaterCompletion() {
                 }
 
                 setStatus(
-                    `Updater failed.\n${parsed.message || "Unknown error."}\n` +
-                    `Log: ${parsed.logPath || getTempUpdaterLogPath()}`
+                    `Updater failed.\n${(parsed && parsed.message) || "Unknown error."}\n` +
+                    `Log: ${(parsed && parsed.logPath) || getTempUpdaterLogPath()}`
                 );
                 return;
             } catch (error) {
@@ -559,33 +645,21 @@ function loadSavedPresets() {
 
     try {
         const savedVideo = localStorage.getItem(VIDEO_PRESET_STORAGE_KEY);
-        if (savedVideo && savedVideo.trim() && fileExists(savedVideo)) {
-            videoPresetPath = savedVideo;
-        } else {
-            videoPresetPath = defaults.video;
-        }
+        videoPresetPath = savedVideo && savedVideo.trim() && fileExists(savedVideo) ? savedVideo : defaults.video;
     } catch (error) {
         videoPresetPath = defaults.video;
     }
 
     try {
         const savedMp3 = localStorage.getItem(MP3_PRESET_STORAGE_KEY);
-        if (savedMp3 && savedMp3.trim() && fileExists(savedMp3)) {
-            mp3PresetPath = savedMp3;
-        } else {
-            mp3PresetPath = defaults.mp3;
-        }
+        mp3PresetPath = savedMp3 && savedMp3.trim() && fileExists(savedMp3) ? savedMp3 : defaults.mp3;
     } catch (error) {
         mp3PresetPath = defaults.mp3;
     }
 
     try {
         const savedWav = localStorage.getItem(WAV_PRESET_STORAGE_KEY);
-        if (savedWav && savedWav.trim() && fileExists(savedWav)) {
-            wavPresetPath = savedWav;
-        } else {
-            wavPresetPath = defaults.wav;
-        }
+        wavPresetPath = savedWav && savedWav.trim() && fileExists(savedWav) ? savedWav : defaults.wav;
     } catch (error) {
         wavPresetPath = defaults.wav;
     }
@@ -609,16 +683,36 @@ function loadSavedPaths() {
     } catch (error) {}
 }
 
-function loadSavedUiState() {
+function loadSavedBackupSettings() {
+    const backupTrackInput = getBackupVideoTrackInput();
+
     try {
-        const saved = localStorage.getItem(PRESET_SECTION_VISIBLE_STORAGE_KEY);
-        if (saved === "true") {
-            presetSectionVisible = true;
-            return;
+        const savedTrack = parseInt(localStorage.getItem(BACKUP_VIDEO_TRACK_STORAGE_KEY), 10);
+        if (savedTrack && savedTrack > 0) {
+            applyBackupDefaults({ videoTrackNumber: savedTrack }, true);
+            applyAlignDefaults({ videoTrackNumber: savedTrack }, true);
+            if (backupTrackInput) {
+                backupTrackInput.dataset.userEdited = "true";
+            }
+        }
+    } catch (error) {
+        applyBackupDefaults({ videoTrackNumber: DEFAULT_BACKUP_VIDEO_TRACK }, true);
+        applyAlignDefaults({ videoTrackNumber: DEFAULT_BACKUP_VIDEO_TRACK }, true);
+    }
+
+    try {
+        const savedAlignTrack = parseInt(localStorage.getItem(ALIGN_VIDEO_TRACK_STORAGE_KEY), 10);
+        if (savedAlignTrack && savedAlignTrack > 0) {
+            applyAlignDefaults({ videoTrackNumber: savedAlignTrack }, true);
         }
     } catch (error) {}
 
-    presetSectionVisible = false;
+    try {
+        const savedFormat = localStorage.getItem(AUDIO_FORMAT_STORAGE_KEY);
+        setSelectedAudioFormat(savedFormat || "mp3");
+    } catch (error) {
+        setSelectedAudioFormat("mp3");
+    }
 }
 
 function saveVideoPreset(nextPath) {
@@ -674,6 +768,87 @@ async function validateBackupExportSettings(backupVideoTrackNumber) {
     return parseHostResult(result) || { ok: false, message: result || "Unknown validation error." };
 }
 
+async function getExportSelectionInfo() {
+    if (!(await ensureHostLoaded())) {
+        return { ok: false, message: "Could not load Premiere host script." };
+    }
+
+    const result = await callHost("exportBackup.getExportSelectionInfo()");
+    return parseHostResult(result) || { ok: false, message: result || "Could not read export selection." };
+}
+
+function renderExportSelectionList(selectionInfo) {
+    const container = document.getElementById("exportSelectionList");
+    if (!container) {
+        return;
+    }
+
+    if (!selectionInfo || !selectionInfo.ok) {
+        container.innerHTML = `<div class="small-note">${(selectionInfo && selectionInfo.message) || "Could not read export selection."}</div>`;
+        exportSelectionState = null;
+        return;
+    }
+
+    exportSelectionState = selectionInfo;
+    const items = Array.isArray(selectionInfo.items) ? selectionInfo.items : [];
+
+    if (!items.length) {
+        container.innerHTML = `<div class="small-note">${selectionInfo.message || "No used audio tracks were found in the active sequence yet. The backup MP4 will still be queued."}</div>`;
+        return;
+    }
+
+    container.innerHTML = items.map((item, index) => {
+        const checkboxId = `exportSelectionItem_${index}`;
+        const checked = item.selected === false ? "" : "checked";
+        const disabled = item.locked ? "disabled" : "";
+        const kindLabel = item.kind === "video" ? "Backup video" : `Audio track ${item.trackNumber}`;
+        const detail = item.kind === "video"
+            ? "Untick this if you do not want to export the backup MP4."
+            : "Untick this track if you do not want to export it.";
+
+        return (
+            `<label class="selection-item" for="${checkboxId}">` +
+                `<input type="checkbox" id="${checkboxId}" data-kind="${item.kind}" data-track-number="${item.trackNumber || 0}" ${checked} ${disabled}>` +
+                `<span>` +
+                    `<strong>${kindLabel}</strong>` +
+                    `<small>${detail}</small>` +
+                `</span>` +
+            `</label>`
+        );
+    }).join("");
+}
+
+function getSelectedAudioTrackNumbers() {
+    const container = document.getElementById("exportSelectionList");
+    if (!container) {
+        return [];
+    }
+
+    return Array.prototype.slice.call(container.querySelectorAll("input[type='checkbox'][data-kind='audio']:checked"))
+        .map((input) => parseInt(input.getAttribute("data-track-number"), 10) || 0)
+        .filter((trackNumber) => trackNumber > 0);
+}
+
+function getSelectedQueueItems() {
+    const container = document.getElementById("exportSelectionList");
+    const videoInput = container ? container.querySelector("input[type='checkbox'][data-kind='video']") : null;
+
+    return {
+        includeVideo: videoInput ? !!videoInput.checked : true,
+        audioTracks: getSelectedAudioTrackNumbers()
+    };
+}
+
+async function refreshExportSelection() {
+    if (busy) {
+        return;
+    }
+
+    renderExportSelectionList({ ok: true, items: [], message: "Reading active sequence tracks..." });
+    const selectionInfo = await getExportSelectionInfo();
+    renderExportSelectionList(selectionInfo);
+}
+
 function parseTrackNumberFromFileName(name, baseName) {
     const lowerName = String(name || "").toLowerCase();
     const lowerBase = String(baseName || "").toLowerCase();
@@ -692,7 +867,51 @@ function parseTrackNumberFromFileName(name, baseName) {
     return parseInt(remainder.substring(0, dotIndex), 10) || 0;
 }
 
-function scanExportFolderForSequence(folderPath, sequenceName) {
+function normalizeAudioEntries(entries, baseName) {
+    const normalized = [];
+
+    (entries || []).forEach((entry) => {
+        if (!entry || !entry.path || !fileExists(entry.path)) {
+            return;
+        }
+
+        const fileName = entry.name || path.basename(entry.path);
+        const trackNumber = parseInt(entry.trackNumber, 10) || parseTrackNumberFromFileName(fileName, baseName);
+        if (trackNumber < 1) {
+            return;
+        }
+
+        normalized.push({
+            path: entry.path,
+            trackNumber,
+            name: fileName
+        });
+    });
+
+    normalized.sort((a, b) => a.trackNumber - b.trackNumber);
+    return normalized;
+}
+
+function readManifestForSequence(folderPath, sequenceName) {
+    if (!folderPath || !sequenceName) {
+        return null;
+    }
+
+    const manifestPath = getManifestPath(folderPath, sequenceName);
+    if (!fileExists(manifestPath)) {
+        return null;
+    }
+
+    const manifest = readJsonFile(manifestPath);
+    if (!manifest || !manifest.baseName) {
+        return null;
+    }
+
+    manifest.manifestPath = manifestPath;
+    return manifest;
+}
+
+function scanExportFolderForSequence(folderPath, sequenceName, manifest) {
     const sanitizedBase = sanitizeSequenceName(sequenceName);
     const entries = fs.readdirSync(folderPath, { withFileTypes: true });
     const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
@@ -700,7 +919,29 @@ function scanExportFolderForSequence(folderPath, sequenceName) {
     const backupPrefix = `${lowerBase}_backup.`;
 
     let videoPath = "";
-    const audio = [];
+    let audio = [];
+
+    if (manifest) {
+        const expectedFiles = Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
+        expectedFiles.forEach((entry) => {
+            if (!entry || !entry.path || !fileExists(entry.path)) {
+                return;
+            }
+
+            if (entry.kind === "video" && !videoPath) {
+                videoPath = entry.path;
+                return;
+            }
+
+            if (entry.kind === "audio") {
+                audio.push({
+                    path: entry.path,
+                    trackNumber: parseInt(entry.trackNumber, 10) || 0,
+                    name: entry.name || path.basename(entry.path)
+                });
+            }
+        });
+    }
 
     files.forEach((fileName) => {
         const absolutePath = path.join(folderPath, fileName);
@@ -712,7 +953,7 @@ function scanExportFolderForSequence(folderPath, sequenceName) {
         }
 
         const trackNumber = parseTrackNumberFromFileName(fileName, sanitizedBase);
-        if (trackNumber > 0) {
+        if (trackNumber > 0 && !audio.some((entry) => entry.path === absolutePath)) {
             audio.push({
                 path: absolutePath,
                 trackNumber,
@@ -721,14 +962,294 @@ function scanExportFolderForSequence(folderPath, sequenceName) {
         }
     });
 
-    audio.sort((a, b) => a.trackNumber - b.trackNumber);
+    audio = normalizeAudioEntries(audio, sanitizedBase);
 
     return {
         baseName: sanitizedBase,
         videoPath,
         audio,
-        folderFiles: files
+        folderFiles: files,
+        manifest: manifest || null
     };
+}
+
+function writeExportManifest(manifest) {
+    if (!manifest || !manifest.folderPath || !manifest.baseName) {
+        return null;
+    }
+
+    const manifestPath = getManifestPath(manifest.folderPath, manifest.baseName);
+    const toWrite = Object.assign({}, manifest, { manifestPath });
+    fs.writeFileSync(manifestPath, `${JSON.stringify(toWrite, null, 2)}\n`, "utf8");
+    return manifestPath;
+}
+
+function removeFileIfExists(filePath) {
+    try {
+        if (fileExists(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+    } catch (error) {}
+}
+
+function updateAlignFolder(folderPath) {
+    alignFolder = folderPath;
+    document.getElementById("alignPath").textContent = folderPath || "No folder selected yet.";
+
+    try {
+        if (folderPath) {
+            localStorage.setItem(ALIGN_FOLDER_STORAGE_KEY, folderPath);
+        }
+    } catch (error) {}
+}
+
+function createExportManifestFromHostResult(parsed) {
+    return {
+        version: 2,
+        createdAt: new Date().toISOString(),
+        folderPath: exportFolder,
+        sequenceName: parsed.sequenceName || "",
+        baseName: parsed.baseName || sanitizeSequenceName(parsed.sequenceName || "Active_Sequence"),
+        backupVideoTrackNumber: parseInt(parsed.backupVideoTrackNumber, 10) || DEFAULT_BACKUP_VIDEO_TRACK,
+        audioFormat: parsed.audioFormat || getSelectedAudioFormat(),
+        expectedFiles: Array.isArray(parsed.queuedFiles) ? parsed.queuedFiles : [],
+        manifestPath: "",
+        projectName: parsed.projectName || "",
+        projectPath: parsed.projectPath || ""
+    };
+}
+
+function clearExportCompletionMonitor() {
+    if (!exportMonitorState) {
+        return;
+    }
+
+    if (exportMonitorState.timer) {
+        clearTimeout(exportMonitorState.timer);
+    }
+
+    exportMonitorState = null;
+}
+
+function getCompletionSummary(state) {
+    const expectedFiles = state.manifest.expectedFiles || [];
+    let completed = 0;
+
+    expectedFiles.forEach((entry) => {
+        if (entry && state.stableCounts[entry.path] >= EXPORT_MONITOR_STABLE_PASSES) {
+            completed += 1;
+        }
+    });
+
+    return `${completed}/${expectedFiles.length}`;
+}
+
+function copyProjectToFolder(projectPath, destinationFolder) {
+    try {
+        if (!projectPath) {
+            return { ok: false, message: "Premiere saved the project, but its path could not be read for copying." };
+        }
+
+        if (!fileExists(projectPath)) {
+            return { ok: false, message: `Premiere saved the project, but the file was not found for copying.\n${projectPath}` };
+        }
+
+        const destinationPath = path.join(destinationFolder, path.basename(projectPath));
+        if (path.resolve(destinationPath).toLowerCase() !== path.resolve(projectPath).toLowerCase()) {
+            fs.copyFileSync(projectPath, destinationPath);
+        }
+
+        return { ok: true, destinationPath };
+    } catch (error) {
+        return { ok: false, message: `Project alignment finished, but the project copy could not be created.\n${error.message}` };
+    }
+}
+
+async function runAlignmentFlow(folderPath, options) {
+    const settings = options || {};
+
+    if (!folderPath) {
+        alert("Choose an align folder first.");
+        return false;
+    }
+
+    setBusyState(true);
+    setStatus(settings.autoTriggered
+        ? "Media Encoder finished. Importing and aligning backup files..."
+        : "Loading Premiere host script...");
+
+    try {
+        if (!(await ensureHostLoaded())) {
+            showBlockingMessage("Could not load Premiere host script.");
+            return false;
+        }
+
+        const activeSequenceName = await getActiveSequenceName();
+        if (!activeSequenceName) {
+            const message = "No active sequence is open in Premiere Pro.";
+            setStatus(message);
+            showBlockingMessage(message);
+            return false;
+        }
+
+        const manifest = settings.manifest || readManifestForSequence(folderPath, activeSequenceName);
+        const matchInfo = scanExportFolderForSequence(folderPath, activeSequenceName, manifest);
+
+        if (matchInfo.manifest && matchInfo.manifest.backupVideoTrackNumber) {
+            applyAlignDefaults({ videoTrackNumber: matchInfo.manifest.backupVideoTrackNumber }, true);
+        }
+
+        if (!matchInfo.videoPath && matchInfo.audio.length === 0) {
+            const message =
+                "No files could be matched in the chosen folder.\n" +
+                `Sequence base: ${matchInfo.baseName}\n` +
+                `Folder files: ${matchInfo.folderFiles.join(" | ")}`;
+            setStatus(message);
+            showBlockingMessage(message);
+            return false;
+        }
+
+        const backupVideoTrackNumber = getPositiveIntValue(
+            "alignVideoTrackInput",
+            (matchInfo.manifest && parseInt(matchInfo.manifest.backupVideoTrackNumber, 10)) || DEFAULT_BACKUP_VIDEO_TRACK
+        );
+        saveAlignVideoTrack(backupVideoTrackNumber);
+        const skipBackupVideo = settings.skipVideo === true || document.getElementById("alignSkipVideoCheckbox").checked;
+        const resolvedVideoPath = skipBackupVideo ? "" : (matchInfo.videoPath || "");
+        const audioJson = JSON.stringify(matchInfo.audio);
+        const script = `exportBackup.alignMappedFiles("${escapeForEvalScript(resolvedVideoPath)}","${escapeForEvalScript(audioJson)}",${backupVideoTrackNumber})`;
+        const result = await callHost(script);
+        const parsed = parseHostResult(result);
+
+        if (!parsed || parsed.ok === false) {
+            const message = (parsed && parsed.message) || "Alignment failed.";
+            setStatus(message);
+            showBlockingMessage(message);
+            return false;
+        }
+
+        const copyResult = copyProjectToFolder(parsed.projectPath, folderPath);
+        if (matchInfo.manifest && matchInfo.manifest.manifestPath) {
+            removeFileIfExists(matchInfo.manifest.manifestPath);
+        }
+
+        const lines = [parsed.message || "Alignment completed."];
+        if (parsed.importBinName) {
+            lines.push(`Imported backup files were added to project bin: ${parsed.importBinName}`);
+        }
+        if (copyResult.ok) {
+            lines.push(`Project copy saved: ${copyResult.destinationPath}`);
+        } else if (copyResult.message) {
+            lines.push(copyResult.message);
+        }
+
+        setStatus(lines.join("\n"));
+        showBlockingMessage(settings.autoTriggered ? "Automatic import and alignment finished." : "Done.");
+        return true;
+    } catch (error) {
+        const message = `Alignment failed.\n${error.message}`;
+        setStatus(message);
+        showBlockingMessage(message);
+        return false;
+    } finally {
+        setBusyState(false);
+    }
+}
+
+function scheduleExportMonitorTick() {
+    if (!exportMonitorState) {
+        return;
+    }
+
+    exportMonitorState.timer = setTimeout(() => {
+        monitorExportCompletion().catch((error) => {
+            setStatus(`Automatic import stopped.\n${error.message}`);
+            clearExportCompletionMonitor();
+        });
+    }, EXPORT_MONITOR_INTERVAL_MS);
+}
+
+async function monitorExportCompletion() {
+    const state = exportMonitorState;
+    if (!state) {
+        return;
+    }
+
+    if ((Date.now() - state.startedAt) > EXPORT_MONITOR_TIMEOUT_MS) {
+        setStatus(
+            "Automatic import timed out while waiting for Media Encoder.\n" +
+            "The queued exports are still in the chosen folder. Use Align Existing Export Folder after the renders finish."
+        );
+        clearExportCompletionMonitor();
+        return;
+    }
+
+    const expectedFiles = state.manifest.expectedFiles || [];
+    if (!expectedFiles.length) {
+        clearExportCompletionMonitor();
+        return;
+    }
+
+    let allStable = true;
+
+    expectedFiles.forEach((entry) => {
+        if (!entry || !entry.path || !fileExists(entry.path)) {
+            if (entry && entry.path) {
+                state.lastSizes[entry.path] = -1;
+                state.stableCounts[entry.path] = 0;
+            }
+            allStable = false;
+            return;
+        }
+
+        const size = fs.statSync(entry.path).size;
+        if (state.lastSizes[entry.path] === size && size > 0) {
+            state.stableCounts[entry.path] = (state.stableCounts[entry.path] || 0) + 1;
+        } else {
+            state.stableCounts[entry.path] = 0;
+        }
+
+        state.lastSizes[entry.path] = size;
+        if (state.stableCounts[entry.path] < EXPORT_MONITOR_STABLE_PASSES) {
+            allStable = false;
+        }
+    });
+
+    if (allStable) {
+        clearExportCompletionMonitor();
+        await runAlignmentFlow(state.manifest.folderPath, {
+            manifest: state.manifest,
+            skipVideo: false,
+            autoTriggered: true
+        });
+        return;
+    }
+
+    setStatus(
+        "Queued jobs were sent to Adobe Media Encoder.\n" +
+        `Waiting for finished files: ${getCompletionSummary(state)} complete.\n` +
+        `Folder: ${state.manifest.folderPath}`
+    );
+    scheduleExportMonitorTick();
+}
+
+function startExportCompletionMonitor(manifest) {
+    clearExportCompletionMonitor();
+
+    exportMonitorState = {
+        manifest,
+        startedAt: Date.now(),
+        lastSizes: {},
+        stableCounts: {},
+        timer: null
+    };
+
+    setStatus(
+        "Queued jobs were sent to Adobe Media Encoder.\n" +
+        `Waiting for finished files: 0/${(manifest.expectedFiles || []).length} complete.\n` +
+        `Folder: ${manifest.folderPath}`
+    );
+    scheduleExportMonitorTick();
 }
 
 async function chooseExportFolder() {
@@ -743,7 +1264,7 @@ async function chooseExportFolder() {
             localStorage.setItem(EXPORT_FOLDER_STORAGE_KEY, exportFolder);
         } catch (error) {}
         document.getElementById("exportPath").textContent = exportFolder;
-        setStatus("Export destination selected. Ready.");
+        setStatus("Export folder selected. Ready.");
     }
 }
 
@@ -754,21 +1275,17 @@ async function chooseAlignFolder() {
 
     const result = window.cep.fs.showOpenDialogEx(false, true, "Choose Existing Export Folder");
     if (result.data && result.data.length > 0) {
-        alignFolder = result.data[0];
-        try {
-            localStorage.setItem(ALIGN_FOLDER_STORAGE_KEY, alignFolder);
-        } catch (error) {}
-        document.getElementById("alignPath").textContent = alignFolder;
-        await refreshAlignmentDefaults(false);
+        updateAlignFolder(result.data[0]);
 
         try {
             const activeSequenceName = await getActiveSequenceName();
-            if (activeSequenceName) {
-                const matchInfo = scanExportFolderForSequence(alignFolder, activeSequenceName);
+            const manifest = readManifestForSequence(alignFolder, activeSequenceName);
+            if (manifest && manifest.backupVideoTrackNumber) {
+                applyAlignDefaults({ videoTrackNumber: manifest.backupVideoTrackNumber }, true);
             }
         } catch (error) {}
 
-        setStatus("Align folder selected. Ready.");
+        setStatus("Existing export folder selected. Ready.");
     }
 }
 
@@ -818,25 +1335,23 @@ async function runExport() {
         return;
     }
 
-    const exportMp3 = document.getElementById("exportMp3Checkbox").checked;
-    const exportWav = document.getElementById("exportWavCheckbox").checked;
+    const selectedAudioFormat = getSelectedAudioFormat();
+    const selectedAudioPresetPath = selectedAudioFormat === "wav" ? wavPresetPath : mp3PresetPath;
+    const backupVideoTrackNumber = getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK);
+    const selectedQueueItems = getSelectedQueueItems();
 
     if (!fileExists(videoPresetPath)) {
         alert("The selected video preset file was not found. Choose the video preset again.");
         return;
     }
 
-    if (exportMp3 && !fileExists(mp3PresetPath)) {
-        alert("The MP3 preset file was not found.");
+    if (!fileExists(selectedAudioPresetPath)) {
+        alert(`The selected ${selectedAudioFormat.toUpperCase()} preset file was not found.`);
         return;
     }
 
-    if (exportWav && !fileExists(wavPresetPath)) {
-        alert("The WAV preset file was not found.");
-        return;
-    }
-
-    const backupVideoTrackNumber = getPositiveIntValue("exportVideoTrackInput", DEFAULT_ALIGN_VIDEO_TRACK);
+    saveBackupVideoTrack(backupVideoTrackNumber);
+    saveSelectedAudioFormat(selectedAudioFormat);
 
     setBusyState(true);
     setStatus("Loading Premiere host script...");
@@ -855,24 +1370,35 @@ async function runExport() {
         return;
     }
 
-    setStatus("Queueing Media Encoder jobs...");
+    setStatus("Queueing Media Encoder jobs and writing export map...");
 
-    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}",${exportMp3},${exportWav},${backupVideoTrackNumber})`;
+    const selectedItemsJson = JSON.stringify(selectedQueueItems);
+    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}","${escapeForEvalScript(selectedAudioFormat)}",${backupVideoTrackNumber},"${escapeForEvalScript(selectedItemsJson)}")`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 
-    if (parsed && parsed.ok === false) {
-        setStatus(parsed.message || "Backup export failed.");
-        showBlockingMessage(parsed.message || "Backup export failed.");
-    } else if (parsed && parsed.message) {
-        setStatus(parsed.message);
-        showBlockingMessage("Done.");
-    } else {
-        setStatus(result || "No response returned from Premiere.");
-        showBlockingMessage("Done.");
+    if (!parsed || parsed.ok === false) {
+        const message = (parsed && parsed.message) || "Backup export failed.";
+        setStatus(message);
+        showBlockingMessage(message);
+        setBusyState(false);
+        return;
     }
 
-    setBusyState(false);
+    try {
+        const manifest = createExportManifestFromHostResult(parsed);
+        manifest.manifestPath = writeExportManifest(manifest);
+        updateAlignFolder(exportFolder);
+        applyBackupDefaults({ videoTrackNumber: manifest.backupVideoTrackNumber }, false);
+        setBusyState(false);
+        startExportCompletionMonitor(manifest);
+        showBlockingMessage("Queue created. ExportBackup will import and align automatically when the files finish exporting.");
+    } catch (error) {
+        setBusyState(false);
+        const message = `Queue created, but the export map could not be written.\n${error.message}`;
+        setStatus(message);
+        showBlockingMessage(message);
+    }
 }
 
 async function alignExistingFolder() {
@@ -880,74 +1406,10 @@ async function alignExistingFolder() {
         return;
     }
 
-    if (!alignFolder) {
-        alert("Choose an align folder first.");
-        return;
-    }
-
-    setBusyState(true);
-    setStatus("Loading Premiere host script...");
-
-    if (!(await ensureHostLoaded())) {
-        showBlockingMessage("Could not load Premiere host script.");
-        setBusyState(false);
-        return;
-    }
-
-    const activeSequenceName = await getActiveSequenceName();
-    if (!activeSequenceName) {
-        setStatus("No active sequence is open in Premiere Pro.");
-        showBlockingMessage("No active sequence is open in Premiere Pro.");
-        setBusyState(false);
-        return;
-    }
-
-    setStatus("Scanning folder and aligning files...");
-
-    let matchInfo = null;
-    try {
-        matchInfo = scanExportFolderForSequence(alignFolder, activeSequenceName);
-    } catch (error) {
-        setStatus(`Could not read the chosen folder.\n${error.message}`);
-        showBlockingMessage(`Could not read the chosen folder.\n${error.message}`);
-        setBusyState(false);
-        return;
-    }
-
-    if (!matchInfo.videoPath && matchInfo.audio.length === 0) {
-        const message =
-            "No files could be matched in the chosen folder.\n" +
-            `Sequence base: ${matchInfo.baseName}\n` +
-            `Folder files: ${matchInfo.folderFiles.join(" | ")}`;
-        setStatus(message);
-        showBlockingMessage(message);
-        setBusyState(false);
-        return;
-    }
-
-    const videoTrackNumber = getPositiveIntValue("alignVideoTrackInput", DEFAULT_ALIGN_VIDEO_TRACK);
-    const videoAudioTrackNumber = getPositiveIntValue("alignVideoAudioTrackInput", DEFAULT_ALIGN_VIDEO_AUDIO_TRACK);
-    const audioStartTrackNumber = getPositiveIntValue("alignAudioStartTrackInput", DEFAULT_ALIGN_AUDIO_START_TRACK);
-    const skipBackupVideo = document.getElementById("alignSkipVideoCheckbox").checked;
-
-    const audioJson = JSON.stringify(matchInfo.audio);
-    const resolvedVideoPath = skipBackupVideo ? "" : (matchInfo.videoPath || "");
-    const script = `exportBackup.alignMatchedFiles("${escapeForEvalScript(resolvedVideoPath)}","${escapeForEvalScript(audioJson)}",${videoTrackNumber},${videoAudioTrackNumber},${audioStartTrackNumber})`;
-    const result = await callHost(script);
-    const parsed = parseHostResult(result);
-
-    if (parsed && parsed.ok === false) {
-        setStatus(parsed.message || "Alignment failed.");
-        showBlockingMessage(parsed.message || "Alignment failed.");
-    } else if (parsed && parsed.message) {
-        setStatus(parsed.message);
-        showBlockingMessage("Done.");
-    } else {
-        setStatus(result || "No response returned from Premiere.");
-        showBlockingMessage("Done.");
-    }
-
-    setBusyState(false);
+    await runAlignmentFlow(alignFolder, {
+        skipVideo: false,
+        autoTriggered: false
+    });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -955,15 +1417,15 @@ document.addEventListener("DOMContentLoaded", () => {
     loadSavedPresets();
     loadSavedPaths();
     loadSavedUiState();
+    bindAudioFormatInputs();
     markBackupInputsDirty();
-    markAlignmentInputsDirty();
-    applyBackupDefaults(getAlignmentDefaultValues(), true);
-    applyAlignmentDefaults(getAlignmentDefaultValues(), true);
+    loadSavedBackupSettings();
     setPresetSectionVisibility(presetSectionVisible);
     setUpdateButton(`Version ${localVersion}`, false);
     checkForUpdates();
     document.getElementById("videoPresetPath").textContent = videoPresetPath;
     updateAudioPresetDisplay();
     setStatus("Ready.");
-    refreshAlignmentDefaults(false);
+    refreshSuggestedBackupTrack(false);
+    refreshExportSelection();
 });

@@ -12,8 +12,27 @@ function ebEscape(value) {
         .split("\n").join("\\n");
 }
 
-function ebResult(ok, message) {
-    return '{"ok":' + (ok ? 'true' : 'false') + ',"message":"' + ebEscape(message) + '"}';
+function ebStringify(payload) {
+    try {
+        return JSON.stringify(payload);
+    } catch (e) {
+        return '{"ok":false,"message":"' + ebEscape(e.toString()) + '"}';
+    }
+}
+
+function ebResult(ok, message, extra) {
+    var payload = { ok: !!ok, message: message || "" };
+    var key;
+
+    if (extra) {
+        for (key in extra) {
+            if (extra.hasOwnProperty(key)) {
+                payload[key] = extra[key];
+            }
+        }
+    }
+
+    return ebStringify(payload);
 }
 
 function ebGetActiveSequence() {
@@ -33,63 +52,6 @@ function ebGetSequenceName(sequence) {
 
     return "Active_Sequence";
 }
-
-exportBackup.getActiveSequenceName = function () {
-    var sequence = ebGetActiveSequence();
-    if (!sequence) {
-        return "";
-    }
-
-    return ebGetSequenceName(sequence);
-};
-
-exportBackup.validateBackupExportSettings = function (backupVideoTrackNumber) {
-    try {
-        var sequence = ebGetActiveSequence();
-        if (!sequence) {
-            return ebResult(false, "No active sequence is open in Premiere Pro.");
-        }
-
-        var resolvedBackupVideoTrackNumber = Math.max(1, parseInt(backupVideoTrackNumber, 10) || 1);
-        var currentVideoTracks = ebGetTrackCount(sequence.videoTracks);
-        if (resolvedBackupVideoTrackNumber > currentVideoTracks) {
-            return ebResult(false, "V" + resolvedBackupVideoTrackNumber + " does not exist in the active sequence.");
-        }
-
-        var targetVideoTrack = sequence.videoTracks[resolvedBackupVideoTrackNumber - 1];
-        if (ebTrackHasClips(targetVideoTrack)) {
-            return ebResult(false, "V" + resolvedBackupVideoTrackNumber + " is not empty.");
-        }
-
-        return ebResult(true, "OK");
-    } catch (e) {
-        return ebResult(false, e.toString());
-    }
-};
-
-exportBackup.getAlignmentDefaults = function () {
-    try {
-        var sequence = ebGetActiveSequence();
-        var currentVideoTracks = sequence ? ebGetTrackCount(sequence.videoTracks) : 0;
-        var currentAudioTracks = sequence ? ebGetTrackCount(sequence.audioTracks) : 0;
-        var suggestedVideoTrack = 5;
-        var suggestedVideoAudioTrack = currentAudioTracks + 1;
-        var suggestedAudioStartTrack = suggestedVideoAudioTrack + 1;
-
-        return '{' +
-            '"ok":true,' +
-            '"hasActiveSequence":' + (sequence ? 'true' : 'false') + ',' +
-            '"sequenceName":"' + ebEscape(sequence ? ebGetSequenceName(sequence) : "") + '",' +
-            '"currentVideoTracks":' + currentVideoTracks + ',' +
-            '"currentAudioTracks":' + currentAudioTracks + ',' +
-            '"suggestedVideoTrack":' + suggestedVideoTrack + ',' +
-            '"suggestedVideoAudioTrack":' + suggestedVideoAudioTrack + ',' +
-            '"suggestedAudioStartTrack":' + suggestedAudioStartTrack +
-        '}';
-    } catch (e) {
-        return '{"ok":false,"message":"' + ebEscape(e.toString()) + '"}';
-    }
-};
 
 function ebSanitizeName(name) {
     var value = String(name || "Active_Sequence");
@@ -141,138 +103,11 @@ function ebGetExportExtension(sequence, presetPath, fallback) {
     try {
         var ext = sequence.getExportFileExtension(presetPath);
         if (ext && ext !== "") {
-            if (ext.charAt(0) !== ".") {
-                return "." + ext;
-            }
-            return ext;
+            return ext.charAt(0) === "." ? ext : "." + ext;
         }
     } catch (e) {}
 
     return fallback;
-}
-
-function ebCaptureMuteStates(sequence) {
-    var states = [];
-
-    if (!sequence.audioTracks || sequence.audioTracks.numTracks === undefined) {
-        return states;
-    }
-
-    for (var i = 0; i < sequence.audioTracks.numTracks; i++) {
-        var track = sequence.audioTracks[i];
-        var muted = false;
-
-        try {
-            if (track && track.isMuted) {
-                muted = track.isMuted();
-            }
-        } catch (e) {}
-
-        states.push(muted ? 1 : 0);
-    }
-
-    return states;
-}
-
-function ebCaptureVideoMuteStates(sequence) {
-    var states = [];
-
-    if (!sequence.videoTracks || sequence.videoTracks.numTracks === undefined) {
-        return states;
-    }
-
-    for (var i = 0; i < sequence.videoTracks.numTracks; i++) {
-        var track = sequence.videoTracks[i];
-        var muted = false;
-
-        try {
-            if (track && track.isMuted) {
-                muted = track.isMuted();
-            }
-        } catch (e) {}
-
-        states.push(muted ? 1 : 0);
-    }
-
-    return states;
-}
-
-function ebRestoreMuteStates(sequence, states) {
-    if (!sequence.audioTracks || sequence.audioTracks.numTracks === undefined) {
-        return;
-    }
-
-    for (var i = 0; i < sequence.audioTracks.numTracks; i++) {
-        var track = sequence.audioTracks[i];
-        if (track && track.setMute && i < states.length) {
-            track.setMute(states[i]);
-        }
-    }
-}
-
-function ebRestoreVideoMuteStates(sequence, states) {
-    if (!sequence.videoTracks || sequence.videoTracks.numTracks === undefined) {
-        return;
-    }
-
-    for (var i = 0; i < sequence.videoTracks.numTracks; i++) {
-        var track = sequence.videoTracks[i];
-        if (track && track.setMute && i < states.length) {
-            track.setMute(states[i]);
-        }
-    }
-}
-
-function ebSetAllTrackMutes(sequence, muteValue) {
-    var changed = 0;
-
-    if (!sequence.audioTracks || sequence.audioTracks.numTracks === undefined) {
-        return changed;
-    }
-
-    for (var i = 0; i < sequence.audioTracks.numTracks; i++) {
-        var track = sequence.audioTracks[i];
-        if (track && track.setMute) {
-            track.setMute(muteValue ? 1 : 0);
-            changed += 1;
-        }
-    }
-
-    return changed;
-}
-
-function ebSetOnlyTrackAudible(sequence, targetIndex) {
-    if (!sequence.audioTracks || sequence.audioTracks.numTracks === undefined) {
-        return;
-    }
-
-    for (var i = 0; i < sequence.audioTracks.numTracks; i++) {
-        var track = sequence.audioTracks[i];
-        if (track && track.setMute) {
-            track.setMute(i === targetIndex ? 0 : 1);
-        }
-    }
-}
-
-function ebHideVideoTracksAbove(sequence, visibleThroughTrackNumber) {
-    var hiddenCount = 0;
-    var maxVisible = Math.max(1, parseInt(visibleThroughTrackNumber, 10) || 1);
-
-    if (!sequence.videoTracks || sequence.videoTracks.numTracks === undefined) {
-        return hiddenCount;
-    }
-
-    for (var i = 0; i < sequence.videoTracks.numTracks; i++) {
-        if ((i + 1) > maxVisible) {
-            var track = sequence.videoTracks[i];
-            if (track && track.setMute) {
-                track.setMute(1);
-                hiddenCount += 1;
-            }
-        }
-    }
-
-    return hiddenCount;
 }
 
 function ebTrackHasClips(track) {
@@ -281,6 +116,127 @@ function ebTrackHasClips(track) {
     } catch (e) {
         return false;
     }
+}
+
+function ebGetTrackCount(trackCollection) {
+    if (!trackCollection || trackCollection.numTracks === undefined) {
+        return 0;
+    }
+
+    return trackCollection.numTracks;
+}
+
+function ebCaptureMuteStates(sequence) {
+    var states = [];
+    var i;
+
+    if (!sequence.audioTracks || sequence.audioTracks.numTracks === undefined) {
+        return states;
+    }
+
+    for (i = 0; i < sequence.audioTracks.numTracks; i++) {
+        try {
+            states.push(sequence.audioTracks[i].isMuted && sequence.audioTracks[i].isMuted() ? 1 : 0);
+        } catch (e) {
+            states.push(0);
+        }
+    }
+
+    return states;
+}
+
+function ebCaptureVideoMuteStates(sequence) {
+    var states = [];
+    var i;
+
+    if (!sequence.videoTracks || sequence.videoTracks.numTracks === undefined) {
+        return states;
+    }
+
+    for (i = 0; i < sequence.videoTracks.numTracks; i++) {
+        try {
+            states.push(sequence.videoTracks[i].isMuted && sequence.videoTracks[i].isMuted() ? 1 : 0);
+        } catch (e) {
+            states.push(0);
+        }
+    }
+
+    return states;
+}
+
+function ebRestoreMuteStates(sequence, states) {
+    var i;
+
+    if (!sequence.audioTracks || sequence.audioTracks.numTracks === undefined) {
+        return;
+    }
+
+    for (i = 0; i < sequence.audioTracks.numTracks; i++) {
+        if (sequence.audioTracks[i] && sequence.audioTracks[i].setMute && i < states.length) {
+            sequence.audioTracks[i].setMute(states[i]);
+        }
+    }
+}
+
+function ebRestoreVideoMuteStates(sequence, states) {
+    var i;
+
+    if (!sequence.videoTracks || sequence.videoTracks.numTracks === undefined) {
+        return;
+    }
+
+    for (i = 0; i < sequence.videoTracks.numTracks; i++) {
+        if (sequence.videoTracks[i] && sequence.videoTracks[i].setMute && i < states.length) {
+            sequence.videoTracks[i].setMute(states[i]);
+        }
+    }
+}
+
+function ebSetAllTrackMutes(sequence, muteValue) {
+    var i;
+
+    if (!sequence.audioTracks || sequence.audioTracks.numTracks === undefined) {
+        return;
+    }
+
+    for (i = 0; i < sequence.audioTracks.numTracks; i++) {
+        if (sequence.audioTracks[i] && sequence.audioTracks[i].setMute) {
+            sequence.audioTracks[i].setMute(muteValue ? 1 : 0);
+        }
+    }
+}
+
+function ebSetOnlyTrackAudible(sequence, targetIndex) {
+    var i;
+
+    if (!sequence.audioTracks || sequence.audioTracks.numTracks === undefined) {
+        return;
+    }
+
+    for (i = 0; i < sequence.audioTracks.numTracks; i++) {
+        if (sequence.audioTracks[i] && sequence.audioTracks[i].setMute) {
+            sequence.audioTracks[i].setMute(i === targetIndex ? 0 : 1);
+        }
+    }
+}
+
+function ebHideVideoTracksAbove(sequence, visibleThroughTrackNumber) {
+    var maxVisible = Math.max(1, parseInt(visibleThroughTrackNumber, 10) || 1);
+    var hiddenCount = 0;
+    var i;
+
+    if (!sequence.videoTracks || sequence.videoTracks.numTracks === undefined) {
+        return hiddenCount;
+    }
+
+    for (i = 0; i < sequence.videoTracks.numTracks; i++) {
+        if ((i + 1) > maxVisible && sequence.videoTracks[i] && sequence.videoTracks[i].setMute) {
+            sequence.videoTracks[i].setMute(1);
+            hiddenCount += 1;
+        }
+    }
+
+    return hiddenCount;
 }
 
 function ebQueueSequence(sequence, outputPath, presetPath, workAreaType) {
@@ -294,56 +250,14 @@ function ebCheckPreset(path, label) {
     }
 }
 
-function ebWriteTextFile(filePath, contents) {
-    var file = new File(ebToFsPath(filePath));
-    file.encoding = "UTF-8";
-    if (!file.open("w")) {
-        throw new Error("Could not write file: " + filePath);
-    }
-    file.write(contents);
-    file.close();
-}
-
-function ebReadTextFile(filePath) {
-    var file = new File(ebToFsPath(filePath));
-    if (!file.exists) {
-        return null;
-    }
-
-    file.encoding = "UTF-8";
-    if (!file.open("r")) {
-        return null;
-    }
-
-    var contents = file.read();
-    file.close();
-    return contents;
-}
-
-function ebReadFolderEntries(folderPath) {
-    var folder = new Folder(ebToFsPath(folderPath));
-    if (!folder.exists) {
-        return [];
-    }
-
-    var entries = folder.getFiles();
-    var files = [];
-
-    for (var i = 0; i < entries.length; i++) {
-        if (entries[i] instanceof File) {
-            files.push(entries[i]);
-        }
-    }
-
-    return files;
-}
-
 function ebFindProjectItemByMediaPath(rootItem, mediaPath) {
+    var i;
+
     if (!rootItem || !rootItem.children) {
         return null;
     }
 
-    for (var i = 0; i < rootItem.children.numItems; i++) {
+    for (i = 0; i < rootItem.children.numItems; i++) {
         var child = rootItem.children[i];
         if (!child) {
             continue;
@@ -366,98 +280,50 @@ function ebFindProjectItemByMediaPath(rootItem, mediaPath) {
     return null;
 }
 
-function ebImportProjectItem(mediaPath) {
+function ebFindChildBinByName(parentItem, name) {
+    var i;
+
+    if (!parentItem || !parentItem.children) {
+        return null;
+    }
+
+    for (i = 0; i < parentItem.children.numItems; i++) {
+        var child = parentItem.children[i];
+        if (child && child.type === ProjectItemType.BIN && child.name === name) {
+            return child;
+        }
+    }
+
+    return null;
+}
+
+function ebEnsureBin(parentItem, name) {
+    var existing = ebFindChildBinByName(parentItem, name);
+    if (existing) {
+        return existing;
+    }
+
+    if (parentItem && parentItem.createBin) {
+        parentItem.createBin(name);
+        return ebFindChildBinByName(parentItem, name);
+    }
+
+    return null;
+}
+
+function ebGetImportBin(sequence) {
+    var root = app.project && app.project.rootItem ? app.project.rootItem : null;
+    if (!root) {
+        return null;
+    }
+
+    return ebEnsureBin(root, "BACKUP") || root;
+}
+
+function ebImportProjectItem(mediaPath, targetBin) {
     var fsPath = ebToFsPath(mediaPath);
-    app.project.importFiles([fsPath], false, app.project.rootItem, false);
-    return ebFindProjectItemByMediaPath(app.project.rootItem, fsPath);
-}
-
-function ebGetTrackCount(trackCollection) {
-    if (!trackCollection || trackCollection.numTracks === undefined) {
-        return 0;
-    }
-
-    return trackCollection.numTracks;
-}
-
-function ebValidateAvailableTracks(sequence, hasVideo, audioCount, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber) {
-    var currentVideoCount = ebGetTrackCount(sequence.videoTracks);
-    var currentAudioCount = ebGetTrackCount(sequence.audioTracks);
-    var requiredVideoCount = hasVideo ? Math.max(1, parseInt(videoTrackNumber, 10) || 1) : 0;
-    var requiredAudioCount = 0;
-
-    if (hasVideo && videoAudioTrackNumber && videoAudioTrackNumber > 0) {
-        requiredAudioCount = Math.max(requiredAudioCount, parseInt(videoAudioTrackNumber, 10) || 1);
-    }
-
-    if (audioCount > 0) {
-        requiredAudioCount = Math.max(
-            requiredAudioCount,
-            (parseInt(audioStartTrackNumber, 10) || 1) + audioCount - 1
-        );
-    }
-
-    if (currentVideoCount >= requiredVideoCount && currentAudioCount >= requiredAudioCount) {
-        return;
-    }
-
-    var lines = ["Not enough tracks in the active sequence."];
-
-    if (currentVideoCount < requiredVideoCount) {
-        lines.push("Video tracks needed: " + requiredVideoCount + ". Current video tracks: " + currentVideoCount + ".");
-    }
-
-    if (currentAudioCount < requiredAudioCount) {
-        lines.push("Audio tracks needed: " + requiredAudioCount + ". Current audio tracks: " + currentAudioCount + ".");
-    }
-
-    if (hasVideo) {
-        lines.push("Backup video target: V" + videoTrackNumber + ".");
-        if (videoAudioTrackNumber && videoAudioTrackNumber > 0) {
-            lines.push("Backup video audio target: A" + videoAudioTrackNumber + ".");
-        }
-    }
-
-    if (audioCount > 0) {
-        lines.push(
-            "Other audio files: " + audioCount +
-            ". Start track: A" + audioStartTrackNumber +
-            ". End track needed: A" + ((parseInt(audioStartTrackNumber, 10) || 1) + audioCount - 1) + "."
-        );
-    }
-
-    throw new Error(lines.join("\n"));
-}
-
-function ebValidateEmptyTargetTracks(sequence, hasVideo, audioCount, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber) {
-    var issues = [];
-
-    if (hasVideo) {
-        var targetVideoTrack = sequence.videoTracks[videoTrackNumber - 1];
-        if (ebTrackHasClips(targetVideoTrack)) {
-            issues.push("V" + videoTrackNumber + " is not empty.");
-        }
-
-        if (videoAudioTrackNumber && videoAudioTrackNumber > 0) {
-            var targetVideoAudioTrack = sequence.audioTracks[videoAudioTrackNumber - 1];
-            if (ebTrackHasClips(targetVideoAudioTrack)) {
-                issues.push("A" + videoAudioTrackNumber + " is not empty.");
-            }
-        }
-    }
-
-    for (var i = 0; i < audioCount; i++) {
-        var targetAudioTrackNumber = audioStartTrackNumber + i;
-        var targetAudioTrack = sequence.audioTracks[targetAudioTrackNumber - 1];
-        if (ebTrackHasClips(targetAudioTrack)) {
-            issues.push("A" + targetAudioTrackNumber + " is not empty.");
-        }
-    }
-
-    if (issues.length > 0) {
-        issues.push("Choose empty destination tracks and try again.");
-        throw new Error(issues.join("\n"));
-    }
+    app.project.importFiles([fsPath], false, targetBin || app.project.rootItem, false);
+    return ebFindProjectItemByMediaPath(targetBin || app.project.rootItem, fsPath) || ebFindProjectItemByMediaPath(app.project.rootItem, fsPath);
 }
 
 function ebCreateTimeAtZero() {
@@ -466,65 +332,258 @@ function ebCreateTimeAtZero() {
     return when;
 }
 
+function ebGetHighestUsedAudioTrackNumber(sequence) {
+    var highest = 0;
+    var i;
 
-function ebAlignFilesToSequence(sequence, videoPath, audioEntries, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber) {
-    if (!sequence) {
-        throw new Error("No active sequence is open in Premiere Pro.");
+    if (!sequence.audioTracks || sequence.audioTracks.numTracks === undefined) {
+        return 0;
     }
 
-    var when = ebCreateTimeAtZero();
+    for (i = 0; i < sequence.audioTracks.numTracks; i++) {
+        if (ebTrackHasClips(sequence.audioTracks[i])) {
+            highest = i + 1;
+        }
+    }
+
+    return highest;
+}
+
+function ebEnsureAudioTrackCount(sequence, requiredCount) {
+    var currentCount = ebGetTrackCount(sequence.audioTracks);
+    var tracksToAdd = requiredCount - currentCount;
+
+    if (tracksToAdd <= 0) {
+        return ebGetTrackCount(sequence.audioTracks);
+    }
+
+    app.enableQE();
+
+    if (typeof qe === "undefined" || !qe.project || !qe.project.getActiveSequence) {
+        throw new Error("QE DOM is not available, so audio tracks could not be created automatically.");
+    }
+
+    var qeSequence = qe.project.getActiveSequence();
+    if (!qeSequence || !qeSequence.addTracks) {
+        throw new Error("The active QE sequence could not be accessed for automatic audio-track creation.");
+    }
+
+    qeSequence.addTracks(0, 0, tracksToAdd, 3, currentCount);
+    return ebGetTrackCount(sequence.audioTracks);
+}
+
+function ebValidateBackupTrack(sequence, backupVideoTrackNumber) {
+    var resolved = Math.max(1, parseInt(backupVideoTrackNumber, 10) || 1);
+    var currentVideoTracks = ebGetTrackCount(sequence.videoTracks);
+
+    if (resolved > currentVideoTracks) {
+        throw new Error("V" + resolved + " does not exist in the active sequence.");
+    }
+
+    if (ebTrackHasClips(sequence.videoTracks[resolved - 1])) {
+        throw new Error("V" + resolved + " is not empty.");
+    }
+}
+
+function ebBuildQueuedFile(kind, path, trackNumber) {
+    return {
+        kind: kind,
+        path: ebToFsPath(path),
+        trackNumber: trackNumber || 0,
+        name: new File(ebToFsPath(path)).name
+    };
+}
+
+function ebGetPathExtension(mediaPath) {
+    var resolved = String(mediaPath || "").toLowerCase();
+    var dotIndex = resolved.lastIndexOf(".");
+    if (dotIndex < 0) {
+        return "";
+    }
+
+    return resolved.substring(dotIndex);
+}
+
+function ebGetOrganizerBinNameForItem(item) {
+    var mediaPath = "";
+    var extension = "";
+    var videoExtensions = {
+        ".mp4": true, ".mov": true, ".mxf": true, ".avi": true, ".m4v": true, ".mpg": true,
+        ".mpeg": true, ".wmv": true, ".webm": true, ".mts": true, ".m2ts": true
+    };
+    var audioExtensions = {
+        ".wav": true, ".mp3": true, ".aac": true, ".m4a": true, ".aif": true, ".aiff": true,
+        ".flac": true, ".ogg": true
+    };
+    var imageExtensions = {
+        ".png": true, ".jpg": true, ".jpeg": true, ".tif": true, ".tiff": true, ".bmp": true,
+        ".gif": true, ".webp": true, ".psd": true, ".exr": true, ".dpx": true
+    };
+    var graphicExtensions = {
+        ".mogrt": true, ".ai": true, ".eps": true, ".svg": true, ".pdf": true
+    };
+
+    try {
+        if (item && item.isSequence && item.isSequence()) {
+            return "SEQUENCES";
+        }
+    } catch (e) {}
+
+    try {
+        mediaPath = item && item.getMediaPath ? item.getMediaPath() : "";
+    } catch (e2) {
+        mediaPath = "";
+    }
+
+    extension = ebGetPathExtension(mediaPath);
+    if (videoExtensions[extension]) {
+        return "VIDEO";
+    }
+    if (audioExtensions[extension]) {
+        return "AUDIO";
+    }
+    if (imageExtensions[extension]) {
+        return "IMAGES";
+    }
+    if (graphicExtensions[extension]) {
+        return "GRAPHICS";
+    }
+
+    return "OTHER";
+}
+
+function ebOrganizeLooseRootItems() {
+    var root = app.project && app.project.rootItem ? app.project.rootItem : null;
+    var organizerRoot;
+    var itemsToMove = [];
+    var movedCounts = {};
     var notes = [];
-    var hasVideo = !!videoPath;
+    var i;
 
-    ebValidateAvailableTracks(
-        sequence,
-        hasVideo,
-        audioEntries.length,
-        videoTrackNumber,
-        videoAudioTrackNumber,
-        audioStartTrackNumber
-    );
-    ebValidateEmptyTargetTracks(
-        sequence,
-        hasVideo,
-        audioEntries.length,
-        videoTrackNumber,
-        videoAudioTrackNumber,
-        audioStartTrackNumber
-    );
-
-    if (videoPath) {
-        var videoItem = ebImportProjectItem(videoPath);
-        if (!videoItem) {
-            throw new Error("Could not import backup video: " + videoPath);
-        }
-        if (videoAudioTrackNumber && videoAudioTrackNumber > 0 && sequence.overwriteClip) {
-            sequence.overwriteClip(videoItem, when.seconds, videoTrackNumber - 1, videoAudioTrackNumber - 1);
-            notes.push("Aligned backup video to V" + videoTrackNumber + " and A" + videoAudioTrackNumber + ": " + videoPath);
-        } else {
-            var videoTrack = sequence.videoTracks[videoTrackNumber - 1];
-            videoTrack.overwriteClip(videoItem, when);
-            notes.push("Aligned backup video to V" + videoTrackNumber + ": " + videoPath);
-        }
-    } else {
-        notes.push("No matching BACKUP video file was found.");
+    if (!root || !root.children) {
+        return notes;
     }
 
-    for (var i = 0; i < audioEntries.length; i++) {
-        var targetTrackNumber = audioStartTrackNumber + i;
-        var audioTrack = sequence.audioTracks[targetTrackNumber - 1];
-        var audioItem = ebImportProjectItem(audioEntries[i].path);
-        if (!audioItem) {
-            throw new Error("Could not import audio track file: " + audioEntries[i].path);
+    organizerRoot = ebEnsureBin(root, "ORGANIZED");
+    if (!organizerRoot) {
+        notes.push("Could not create the ORGANIZED bin.");
+        return notes;
+    }
+
+    for (i = 0; i < root.children.numItems; i++) {
+        var child = root.children[i];
+        if (!child || child.type === ProjectItemType.BIN) {
+            continue;
         }
-        audioTrack.overwriteClip(audioItem, when);
-        notes.push("Aligned audio to A" + targetTrackNumber + ": " + audioEntries[i].name);
+
+        itemsToMove.push(child);
+    }
+
+    for (i = 0; i < itemsToMove.length; i++) {
+        var item = itemsToMove[i];
+        var binName = ebGetOrganizerBinNameForItem(item);
+        var targetBin = ebEnsureBin(organizerRoot, binName);
+
+        if (!targetBin || !item.moveBin) {
+            continue;
+        }
+
+        try {
+            item.moveBin(targetBin);
+            movedCounts[binName] = (movedCounts[binName] || 0) + 1;
+        } catch (moveError) {}
+    }
+
+    for (var key in movedCounts) {
+        if (movedCounts.hasOwnProperty(key)) {
+            notes.push("Organized " + movedCounts[key] + " loose item(s) into " + key + ".");
+        }
+    }
+
+    if (!notes.length) {
+        notes.push("No loose root items needed organizing.");
     }
 
     return notes;
 }
 
-exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, exportMp3, exportWav, backupVideoTrackNumber) {
+exportBackup.getActiveSequenceName = function () {
+    var sequence = ebGetActiveSequence();
+    return sequence ? ebGetSequenceName(sequence) : "";
+};
+
+exportBackup.getExportSelectionInfo = function () {
+    try {
+        var sequence = ebGetActiveSequence();
+        var items = [{
+            kind: "video",
+            label: "Backup MP4",
+            selected: true,
+            locked: false,
+            trackNumber: 0
+        }];
+        var i;
+
+        if (!sequence) {
+            return ebResult(false, "No active sequence is open in Premiere Pro.");
+        }
+
+        for (i = 0; i < ebGetTrackCount(sequence.audioTracks); i++) {
+            if (!ebTrackHasClips(sequence.audioTracks[i])) {
+                continue;
+            }
+
+            items.push({
+                kind: "audio",
+                label: "Track " + (i + 1),
+                selected: true,
+                locked: false,
+                trackNumber: i + 1
+            });
+        }
+
+        return ebResult(true, items.length > 1 ? "Choose which backup files should be queued." : "Choose which backup files should be queued.", {
+            sequenceName: ebGetSequenceName(sequence),
+            items: items
+        });
+    } catch (e) {
+        return ebResult(false, e.toString());
+    }
+};
+
+exportBackup.validateBackupExportSettings = function (backupVideoTrackNumber) {
+    try {
+        var sequence = ebGetActiveSequence();
+        if (!sequence) {
+            return ebResult(false, "No active sequence is open in Premiere Pro.");
+        }
+
+        ebValidateBackupTrack(sequence, backupVideoTrackNumber);
+        return ebResult(true, "OK");
+    } catch (e) {
+        return ebResult(false, e.toString());
+    }
+};
+
+exportBackup.getAlignmentDefaults = function () {
+    try {
+        var sequence = ebGetActiveSequence();
+        var currentVideoTracks = sequence ? ebGetTrackCount(sequence.videoTracks) : 0;
+        var suggestedVideoTrack = currentVideoTracks >= 5 ? 5 : Math.max(1, currentVideoTracks);
+
+        return ebResult(true, "OK", {
+            hasActiveSequence: !!sequence,
+            sequenceName: sequence ? ebGetSequenceName(sequence) : "",
+            currentVideoTracks: currentVideoTracks,
+            currentAudioTracks: sequence ? ebGetTrackCount(sequence.audioTracks) : 0,
+            suggestedVideoTrack: suggestedVideoTrack || 1
+        });
+    } catch (e) {
+        return ebResult(false, e.toString());
+    }
+};
+
+exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, audioFormat, backupVideoTrackNumber, selectedItemsJson) {
     try {
         var sequence = ebGetActiveSequence();
         if (!sequence) {
@@ -539,128 +598,208 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
             return ebResult(false, "Set sequence In and Out points first, then run ExportBackup again.");
         }
 
+        ebValidateBackupTrack(sequence, backupVideoTrackNumber);
+
+        var resolvedAudioFormat = String(audioFormat || "mp3").toLowerCase() === "wav" ? "wav" : "mp3";
+        var audioPresetPath = resolvedAudioFormat === "wav" ? wavPresetPath : mp3PresetPath;
+        var audioLabel = resolvedAudioFormat.toUpperCase();
+        var resolvedBackupVideoTrackNumber = Math.max(1, parseInt(backupVideoTrackNumber, 10) || 5);
+        var sequenceName = ebGetSequenceExportBaseName(sequence);
+        var originalMuteStates = ebCaptureMuteStates(sequence);
+        var workAreaType = 1;
+        var notes = [];
+        var queuedFiles = [];
+        var selectedAudioTracks = [];
+        var includeBackupVideo = true;
+        var i;
+
+        if (selectedItemsJson) {
+            try {
+                var selectedItems = JSON.parse(selectedItemsJson);
+                if (selectedItems && selectedItems.audioTracks && selectedItems.audioTracks.join) {
+                    selectedAudioTracks = selectedItems.audioTracks;
+                }
+                if (selectedItems && selectedItems.includeVideo === false) {
+                    includeBackupVideo = false;
+                }
+            } catch (e) {
+                selectedAudioTracks = [];
+                includeBackupVideo = true;
+            }
+        }
+
         ebCheckPreset(videoPresetPath, "Video");
-        if (exportMp3) {
-            ebCheckPreset(mp3PresetPath, "MP3");
-        }
-        if (exportWav) {
-            ebCheckPreset(wavPresetPath, "WAV");
-        }
+        ebCheckPreset(audioPresetPath, audioLabel);
 
         app.encoder.launchEncoder();
         $.sleep(2500);
 
-        var sequenceName = ebGetSequenceExportBaseName(sequence);
-        var originalMuteStates = ebCaptureMuteStates(sequence);
-        var notes = [];
-        var queuedCount = 0;
-        var workAreaType = 1;
-        var resolvedBackupVideoTrackNumber = Math.max(1, parseInt(backupVideoTrackNumber, 10) || 5);
-
         ebSetAllTrackMutes(sequence, 0);
 
-        var videoExtension = ebGetExportExtension(sequence, videoPresetPath, ".mp4");
-        var videoPath = ebToFsPath(folderPath + "\\" + sequenceName + "_BACKUP" + videoExtension);
-        var hiddenVideoTrackCount = 0;
-        var videoJobId = 0;
-        hiddenVideoTrackCount = ebHideVideoTracksAbove(sequence, resolvedBackupVideoTrackNumber);
-        videoJobId = ebQueueSequence(sequence, videoPath, videoPresetPath, workAreaType);
-        if (!videoJobId || videoJobId === "0") {
-            ebRestoreMuteStates(sequence, originalMuteStates);
-            return ebResult(false, "Could not queue the MP4 export in Adobe Media Encoder.\nPreset: " + ebToFsPath(videoPresetPath) + "\nOutput: " + videoPath + "\nJob ID: " + videoJobId);
-        }
+        if (includeBackupVideo) {
+            var videoExtension = ebGetExportExtension(sequence, videoPresetPath, ".mp4");
+            var videoPath = ebToFsPath(folderPath + "\\" + sequenceName + "_BACKUP" + videoExtension);
+            var hiddenVideoTrackCount = ebHideVideoTracksAbove(sequence, resolvedBackupVideoTrackNumber);
+            var videoJobId = ebQueueSequence(sequence, videoPath, videoPresetPath, workAreaType);
+            if (!videoJobId || videoJobId === "0") {
+                ebRestoreMuteStates(sequence, originalMuteStates);
+                return ebResult(false, "Could not queue the MP4 export in Adobe Media Encoder.");
+            }
 
-        queuedCount += 1;
-        notes.push("Queued MP4 backup: " + videoPath);
-        notes.push("MP4 job ID: " + videoJobId);
-        notes.push("MP4 backup visible through V" + resolvedBackupVideoTrackNumber + ".");
-        if (hiddenVideoTrackCount > 0) {
-            notes.push("Left " + hiddenVideoTrackCount + " video track(s) above V" + resolvedBackupVideoTrackNumber + " hidden after queueing the MP4 backup.");
+            queuedFiles.push(ebBuildQueuedFile("video", videoPath, 0));
+            notes.push("Queued MP4 backup: " + videoPath);
+            if (hiddenVideoTrackCount > 0) {
+                notes.push("Video tracks above V" + resolvedBackupVideoTrackNumber + " were hidden while the backup MP4 queue item was created.");
+            }
         } else {
-            notes.push("No video tracks above V" + resolvedBackupVideoTrackNumber + " needed to be hidden for the MP4 backup.");
+            notes.push("Skipped backup MP4 export.");
         }
 
-        var trackCount = sequence.audioTracks && sequence.audioTracks.numTracks !== undefined ? sequence.audioTracks.numTracks : 0;
-
-        for (var i = 0; i < trackCount; i++) {
-            var track = sequence.audioTracks[i];
-            if (!ebTrackHasClips(track)) {
+        for (i = 0; i < ebGetTrackCount(sequence.audioTracks); i++) {
+            if (!ebTrackHasClips(sequence.audioTracks[i])) {
                 continue;
             }
 
+            if (selectedAudioTracks.length && selectedAudioTracks.join) {
+                var selected = false;
+                var j;
+                for (j = 0; j < selectedAudioTracks.length; j++) {
+                    if ((parseInt(selectedAudioTracks[j], 10) || 0) === (i + 1)) {
+                        selected = true;
+                        break;
+                    }
+                }
+
+                if (!selected) {
+                    notes.push("Skipped " + audioLabel + " export for Track" + (i + 1) + ".");
+                    continue;
+                }
+            }
+
+            ebSetOnlyTrackAudible(sequence, i);
             var exportTrackNumber = i + 1;
+            var audioExtension = ebGetExportExtension(sequence, audioPresetPath, "." + resolvedAudioFormat);
+            var audioPath = ebToFsPath(folderPath + "\\" + sequenceName + "_Track" + exportTrackNumber + audioExtension);
+            var audioJobId = ebQueueSequence(sequence, audioPath, audioPresetPath, workAreaType);
 
-            if (exportMp3) {
-                ebSetOnlyTrackAudible(sequence, i);
-                var mp3Extension = ebGetExportExtension(sequence, mp3PresetPath, ".mp3");
-                var mp3Path = ebToFsPath(folderPath + "\\" + sequenceName + "_Track" + exportTrackNumber + mp3Extension);
-                var mp3JobId = ebQueueSequence(sequence, mp3Path, mp3PresetPath, workAreaType);
-                if (mp3JobId && mp3JobId !== "0") {
-                    queuedCount += 1;
-                    notes.push("Queued MP3 track export: " + mp3Path);
-                } else {
-                    notes.push("Failed to queue MP3 for Track" + exportTrackNumber + ". Preset: " + ebToFsPath(mp3PresetPath));
-                }
+            if (!audioJobId || audioJobId === "0") {
+                notes.push("Failed to queue " + audioLabel + " for Track" + exportTrackNumber + ".");
+                continue;
             }
 
-            if (exportWav) {
-                ebSetOnlyTrackAudible(sequence, i);
-                var wavExtension = ebGetExportExtension(sequence, wavPresetPath, ".wav");
-                var wavPath = ebToFsPath(folderPath + "\\" + sequenceName + "_Track" + exportTrackNumber + wavExtension);
-                var wavJobId = ebQueueSequence(sequence, wavPath, wavPresetPath, workAreaType);
-                if (wavJobId && wavJobId !== "0") {
-                    queuedCount += 1;
-                    notes.push("Queued WAV track export: " + wavPath);
-                } else {
-                    notes.push("Failed to queue WAV for Track" + exportTrackNumber + ". Preset: " + ebToFsPath(wavPresetPath));
-                }
-            }
+            queuedFiles.push(ebBuildQueuedFile("audio", audioPath, exportTrackNumber));
+            notes.push("Queued " + audioLabel + " track export: " + audioPath);
         }
 
         ebRestoreMuteStates(sequence, originalMuteStates);
 
-        notes.unshift("Queued jobs: " + queuedCount + ".");
-        notes.push("All exports were sent to Adobe Media Encoder queue using sequence In/Out.");
-        notes.push("Expected names: " + sequenceName + "_BACKUP" + videoExtension + " and " + sequenceName + "_TrackN audio files.");
-        notes.push("Muted tracks were cleared for the MP4 queue job.");
-        notes.push("Track solo is not exposed by Premiere's official scripting API, so clear any solo buttons manually before queuing.");
+        try {
+            if (app.encoder.startBatch) {
+                app.encoder.startBatch();
+            }
+        } catch (e) {}
 
-        return ebResult(true, notes.join("\n"));
+        return ebResult(true, "Queued jobs: " + queuedFiles.length + ".\n" + notes.join("\n"), {
+            sequenceName: ebGetSequenceName(sequence),
+            baseName: sequenceName,
+            backupVideoTrackNumber: resolvedBackupVideoTrackNumber,
+            audioFormat: resolvedAudioFormat,
+            queuedFiles: queuedFiles,
+            projectName: app.project && app.project.name ? app.project.name : "",
+            projectPath: app.project && app.project.path ? app.project.path : ""
+        });
     } catch (e) {
         return ebResult(false, e.toString());
     }
 };
 
-exportBackup.alignMatchedFiles = function (videoPath, audioJson, videoTrackNumber, videoAudioTrackNumber, audioStartTrackNumber) {
+exportBackup.alignMappedFiles = function (videoPath, audioJson, backupVideoTrackNumber) {
     try {
         var sequence = ebGetActiveSequence();
         if (!sequence) {
             return ebResult(false, "No active sequence is open in Premiere Pro.");
         }
-        var parsedAudio = [];
+
+        var audioEntries = [];
         if (audioJson) {
-            try {
-                parsedAudio = JSON.parse(audioJson);
-            } catch (e) {
-                return ebResult(false, "Could not parse audio file list.");
+            audioEntries = JSON.parse(audioJson);
+        }
+
+        if (!videoPath && (!audioEntries || !audioEntries.length)) {
+            return ebResult(false, "No matched backup video or audio files were provided.");
+        }
+
+        var resolvedBackupTrack = Math.max(1, parseInt(backupVideoTrackNumber, 10) || 1);
+        if (resolvedBackupTrack > ebGetTrackCount(sequence.videoTracks)) {
+            return ebResult(false, "V" + resolvedBackupTrack + " does not exist in the active sequence.");
+        }
+        if (videoPath && ebTrackHasClips(sequence.videoTracks[resolvedBackupTrack - 1])) {
+            return ebResult(false, "V" + resolvedBackupTrack + " is not empty.");
+        }
+
+        var highestUsedAudioTrack = ebGetHighestUsedAudioTrackNumber(sequence);
+        var backupVideoAudioTrackNumber = videoPath ? highestUsedAudioTrack + 1 : 0;
+        var firstOtherAudioTrack = videoPath ? backupVideoAudioTrackNumber + 1 : highestUsedAudioTrack + 1;
+        var finalRequiredAudioTrack = firstOtherAudioTrack + (audioEntries && audioEntries.length ? audioEntries.length : 0) - 1;
+        var when = ebCreateTimeAtZero();
+        var notes = [];
+        var importBin = ebGetImportBin(sequence);
+        var organizerNotes;
+        var i;
+
+        if (videoPath) {
+            finalRequiredAudioTrack = Math.max(finalRequiredAudioTrack, backupVideoAudioTrackNumber);
+        }
+
+        if (finalRequiredAudioTrack > 0) {
+            ebEnsureAudioTrackCount(sequence, finalRequiredAudioTrack);
+        }
+
+        if (videoPath) {
+            var videoItem = ebImportProjectItem(videoPath, importBin);
+            if (!videoItem) {
+                return ebResult(false, "Could not import backup video: " + videoPath);
             }
+
+            if (sequence.overwriteClip) {
+                sequence.overwriteClip(videoItem, when.seconds, resolvedBackupTrack - 1, backupVideoAudioTrackNumber - 1);
+            } else {
+                sequence.videoTracks[resolvedBackupTrack - 1].overwriteClip(videoItem, when);
+            }
+
+            notes.push("Aligned backup MP4 to V" + resolvedBackupTrack + " and its audio to A" + backupVideoAudioTrackNumber + ".");
         }
 
-        if (!videoPath && (!parsedAudio || !parsedAudio.length)) {
-            return ebResult(false, "No matched video or audio files were provided.");
+        for (i = 0; i < audioEntries.length; i++) {
+            var targetTrackNumber = firstOtherAudioTrack + i;
+            var audioItem = ebImportProjectItem(audioEntries[i].path, importBin);
+            if (!audioItem) {
+                return ebResult(false, "Could not import audio file: " + audioEntries[i].path);
+            }
+
+            sequence.audioTracks[targetTrackNumber - 1].overwriteClip(audioItem, when);
+            notes.push("Aligned " + (audioEntries[i].name || ("Track" + audioEntries[i].trackNumber)) + " to A" + targetTrackNumber + ".");
         }
 
-        var notes = ebAlignFilesToSequence(
-            sequence,
-            videoPath,
-            parsedAudio || [],
-            parseInt(videoTrackNumber, 10) || 1,
-            parseInt(videoAudioTrackNumber, 10) || 1,
-            parseInt(audioStartTrackNumber, 10) || 1
-        );
+        organizerNotes = ebOrganizeLooseRootItems();
+        for (i = 0; i < organizerNotes.length; i++) {
+            notes.push(organizerNotes[i]);
+        }
 
-        notes.unshift("Alignment completed at sequence start.");
-        return ebResult(true, notes.join("\n"));
+        try {
+            if (app.project && app.project.save) {
+                app.project.save();
+            }
+        } catch (e) {}
+
+        return ebResult(true, "Alignment completed at sequence start.\n" + notes.join("\n"), {
+            projectPath: app.project && app.project.path ? app.project.path : "",
+            projectName: app.project && app.project.name ? app.project.name : "",
+            backupVideoTrackNumber: resolvedBackupTrack,
+            backupVideoAudioTrackNumber: backupVideoAudioTrackNumber,
+            firstOtherAudioTrack: firstOtherAudioTrack,
+            importBinName: importBin && importBin.name ? importBin.name : ""
+        });
     } catch (e) {
         return ebResult(false, e.toString());
     }

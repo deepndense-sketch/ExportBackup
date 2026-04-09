@@ -289,6 +289,36 @@ button:disabled {
         grid-template-columns: 1fr;
     }
 }
+
+.selection-list {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+}
+
+.selection-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    color: var(--text);
+    font-size: 13px;
+}
+
+.selection-item span {
+    display: grid;
+    gap: 2px;
+}
+
+.selection-item strong {
+    font-size: 13px;
+}
+
+.selection-item small {
+    color: var(--muted);
+}
 </style>
 <script src="js/CSInterface.js"></script>
 <script src="js/main.js"></script>
@@ -308,9 +338,47 @@ button:disabled {
 
     <section class="card stack">
         <div>
+            <div class="section-label">Align</div>
+            <h2>Align Existing Export Folder</h2>
+            <p class="muted">Import and align backup exports, then save the project and copy it to the export folder.</p>
+        </div>
+
+        <div class="action-line">
+            <button id="chooseAlignFolderButton" class="secondary" onclick="chooseAlignFolder()">Choose Existing Export Folder</button>
+            <div class="path-box action-value value-text" id="alignPath">No folder selected yet.</div>
+        </div>
+
+        <div class="two-column">
+            <div class="stack">
+                <label class="option">
+                    <input type="checkbox" id="alignSkipVideoCheckbox">
+                    <span>Skip importing the backup video file and only align audio files.</span>
+                </label>
+
+                <div class="field">
+                    <label for="alignVideoTrackInput">Backup MP4 video track for this manual align</label>
+                    <input id="alignVideoTrackInput" type="number" min="1" value="5">
+                </div>
+            </div>
+
+            <div class="small-note">This manual align is for late imports after export is already finished. ExportBackup still tries to remember the same backup MP4 video track from export, but you can change it here if needed. Backup MP4 audio goes to the first new audio track after your current sequence audio, and the rest of the exported audio files go to the tracks after that automatically.</div>
+        </div>
+
+        <div class="row">
+            <button id="alignFolderButton" onclick="alignExistingFolder()">Start Backup Media Import and Align To Project</button>
+        </div>
+    </section>
+
+    <section class="card stack">
+        <div>
             <div class="section-label">Backup</div>
             <h2>Queue Backup Exports</h2>
-            <p class="muted">Use this section to send the MP4 backup and optional audio exports to Adobe Media Encoder.</p>
+            <p class="muted">Send the backup MP4 and one set of split audio exports to Adobe Media Encoder, then let ExportBackup import and align them automatically after the queue finishes.</p>
+        </div>
+
+        <div class="action-line">
+            <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Export Folder</button>
+            <div class="path-box action-value value-text" id="exportPath">No folder selected yet.</div>
         </div>
 
         <div class="row">
@@ -332,29 +400,26 @@ button:disabled {
                 <button id="chooseWavPresetButton" class="preset-button" onclick="chooseWavPreset()">Choose WAV Preset</button>
                 <div class="path-box action-value value-text" id="wavPresetPath"></div>
             </div>
-
-            <div class="action-line">
-                <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Export Folder</button>
-                <div class="path-box action-value value-text" id="exportPath">No folder selected yet.</div>
-            </div>
         </div>
 
         <div class="two-column">
             <div class="field">
-                <label for="exportVideoTrackInput">Backup Video Track Number</label>
+                <label for="exportVideoTrackInput">Choose the video track where your backup MP4 should go so the layers above it stay hidden in the backup.</label>
                 <input id="exportVideoTrackInput" type="number" min="1" value="5">
             </div>
 
             <div class="detail-stack">
-                <label class="option">
-                    <input type="checkbox" id="exportMp3Checkbox" checked>
-                    <span>Queue each audio track as a separate MP3 file.</span>
-                </label>
-
-                <label class="option">
-                    <input type="checkbox" id="exportWavCheckbox">
-                    <span>Queue each audio track as a separate WAV file.</span>
-                </label>
+                <div class="field">
+                    <label>Audio Export Format</label>
+                    <label class="option">
+                        <input type="radio" id="audioFormatMp3" name="audioFormat" value="mp3" checked>
+                        <span>Export each used audio track as an MP3 file.</span>
+                    </label>
+                    <label class="option">
+                        <input type="radio" id="audioFormatWav" name="audioFormat" value="wav">
+                        <span>Export each used audio track as a WAV file.</span>
+                    </label>
+                </div>
             </div>
         </div>
 
@@ -362,50 +427,17 @@ button:disabled {
             <button id="exportButton" onclick="runExport()">Start Backup Queue</button>
         </div>
 
-        <p class="warning">Exports use sequence In/Out for encoding. For the MP4 backup, video tracks above the selected backup video track are hidden automatically while the queue job is created. Import and alignment from a folder are handled separately below.</p>
-    </section>
-
-    <section class="card stack">
-        <div>
-            <div class="section-label">Align</div>
-            <h2>Align Existing Export Folder</h2>
-            <p class="muted">Import a matching <code>SequenceName_BACKUP</code> file and any <code>SequenceName_TrackN</code> audio files from a chosen folder onto the active sequence from time 0.</p>
-        </div>
-
-        <div class="action-line">
-            <button id="chooseAlignFolderButton" class="secondary" onclick="chooseAlignFolder()">Choose Backup Medias</button>
-            <div class="path-box action-value value-text" id="alignPath">No folder selected yet.</div>
-        </div>
-
-        <div class="two-column">
-            <div class="stack">
-                <label class="option">
-                    <input type="checkbox" id="alignSkipVideoCheckbox">
-                    <span>Skip importing the backup video file and only align audio files.</span>
-                </label>
-
-                <div class="field">
-                    <label for="alignVideoTrackInput">Backup Video Track Number</label>
-                    <input id="alignVideoTrackInput" type="number" min="1" value="5">
-                </div>
-
-                <div class="field">
-                    <label for="alignVideoAudioTrackInput">Backup Video Audio Track Number</label>
-                    <input id="alignVideoAudioTrackInput" type="number" min="1" value="1">
-                </div>
-
-                <div class="field">
-                    <label for="alignAudioStartTrackInput">Other Audio Files Start Track Number</label>
-                    <input id="alignAudioStartTrackInput" type="number" min="1" value="2">
-                </div>
+        <div class="stack">
+            <div class="section-label">Queue Preview</div>
+            <div class="row">
+                <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh Export Selection</button>
             </div>
-
-            <div class="small-note">Import and alignment start from the beginning of the timeline for the active sequence.</div>
+            <div id="exportSelectionList" class="selection-list">
+                <div class="small-note">Choose which files should be sent to Media Encoder. The backup MP4 stays selected, and all used audio tracks start selected by default.</div>
+            </div>
         </div>
 
-        <div class="row">
-            <button id="alignFolderButton" onclick="alignExistingFolder()">Start Backup Media Import and Align To Project</button>
-        </div>
+        <p class="warning">Exports use sequence In/Out for encoding. The backup MP4 uses the chosen video track, each audio export is created only for tracks that actually contain clips, and ExportBackup watches the export folder so it can import and align everything automatically when Media Encoder finishes.</p>
     </section>
 
     <section class="card stack">

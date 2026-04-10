@@ -52,10 +52,10 @@ The current alignment workflow is intentionally manual:
 
 ## Presets Used
 
-- MP4 video defaults to: `D:\Work\Tools\ExportBackup\presets\1080 AIR.epr`
+- MP4 video defaults to the bundled preset at `presets/1080 AIR.epr`
 - The panel can be pointed at a different video `.epr` preset, and it remembers that choice until changed.
-- MP3 audio: `D:\Work\Tools\ExportBackup\presets\mp3.epr`
-- WAV audio: `C:\Program Files\Adobe\Adobe Media Encoder 2026\MediaIO\systempresets\3F3F3F3F_57415645\Waveform Audio 48kHz 16-bit.epr`
+- MP3 audio defaults to the bundled preset at `presets/mp3.epr`
+- WAV audio defaults to the bundled preset at `presets/wav.epr`
 
 ## Important Limitation
 
@@ -67,7 +67,7 @@ Track deletion is also not supported reliably through Premiere's official script
 
 The intended installed location is:
 
-- `C:\Users\user\AppData\Roaming\Adobe\CEP\extensions\ExportBackup`
+- `%APPDATA%\Adobe\CEP\extensions\ExportBackup`
 
 The panel checks GitHub on load by comparing local `version.json` against:
 
@@ -79,14 +79,14 @@ When `Update From GitHub` is used, the updater script downloads:
 
 It then extracts that ZIP and mirrors the contents into the installed CEP extension folder:
 
-- `C:\Users\user\AppData\Roaming\Adobe\CEP\extensions\ExportBackup`
+- `%APPDATA%\Adobe\CEP\extensions\ExportBackup`
 
 Using the AppData CEP folder avoids most `Program Files` permission problems during updates.
 
 ## Release Archives
 
-Released snapshots are now stored in a sibling folder under `D:\Work\Tools`:
+Released snapshots are now stored in a sibling folder next to the repo by default:
 
-- `D:\Work\Tools\ExportBackup_Versions\<version>`
+- `..\ExportBackup_Versions\<version>`
 
 Use `archive_release.ps1` from the repo root to copy the current project into that versioned archive folder and save a small `release-info.json` file with the version and commit.

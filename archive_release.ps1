@@ -42,9 +42,16 @@ if ($robocopyExitCode -ge 8) {
     throw "robocopy failed with exit code $robocopyExitCode"
 }
 
+$gitCommand = $null
+try {
+    $gitCommand = (Get-Command git -ErrorAction Stop).Source
+} catch {}
+
 $commit = ""
 try {
-    $commit = (& 'C:\Program Files\Git\cmd\git.exe' -C $repoRoot rev-parse HEAD).Trim()
+    if ($gitCommand) {
+        $commit = (& $gitCommand -C $repoRoot rev-parse HEAD).Trim()
+    }
 } catch {}
 
 $releaseInfo = [ordered]@{

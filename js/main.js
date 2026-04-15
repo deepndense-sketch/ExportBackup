@@ -1415,7 +1415,6 @@ async function runExport() {
         applyBackupDefaults({ videoTrackNumber: manifest.backupVideoTrackNumber }, false);
         setBusyState(false);
         startExportCompletionMonitor(manifest);
-        showBlockingMessage("Queue created. ExportBackup will import and align automatically when the files finish exporting.");
     } catch (error) {
         setBusyState(false);
         const message = `Queue created, but the export map could not be written.\n${error.message}`;

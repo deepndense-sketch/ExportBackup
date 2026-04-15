@@ -1,5 +1,5 @@
 {
-  "version": "1.3.6",
+  "version": "1.3.7",
   "channel": "main",
-  "notes": "Release 1.3.6 makes deployment portable from any folder location and syncs extension version metadata."
+  "notes": "Release 1.3.7 removes the queue-created blocking popup so automatic export monitoring can continue without user confirmation."
 }

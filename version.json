@@ -1,5 +1,5 @@
 {
-  "version": "1.3.7",
+  "version": "1.3.9",
   "channel": "main",
-  "notes": "Release 1.3.7 removes the queue-created blocking popup so automatic export monitoring can continue without user confirmation."
+  "notes": "Release 1.3.9 waits 20 seconds for Media Encoder to launch and 10 seconds between queue requests to avoid duplicate split-audio exports."
 }

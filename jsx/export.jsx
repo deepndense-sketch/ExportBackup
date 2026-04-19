@@ -1,4 +1,6 @@
 var exportBackup = exportBackup || {};
+var EB_ENCODER_LAUNCH_WAIT_MS = 20000;
+var EB_ENCODER_QUEUE_SETTLE_WAIT_MS = 10000;
 
 function ebEscape(value) {
     if (value === null || value === undefined) {
@@ -241,6 +243,19 @@ function ebHideVideoTracksAbove(sequence, visibleThroughTrackNumber) {
 
 function ebQueueSequence(sequence, outputPath, presetPath, workAreaType) {
     return app.encoder.encodeSequence(sequence, ebToFsPath(outputPath), ebToFsPath(presetPath), workAreaType, 0);
+}
+
+function ebWaitForEncoderQueueSettle() {
+    $.sleep(EB_ENCODER_QUEUE_SETTLE_WAIT_MS);
+}
+
+function ebQueueSequenceWithSettle(sequence, outputPath, presetPath, workAreaType) {
+    var jobId = ebQueueSequence(sequence, outputPath, presetPath, workAreaType);
+    if (jobId && jobId !== "0") {
+        ebWaitForEncoderQueueSettle();
+    }
+
+    return jobId;
 }
 
 function ebCheckPreset(path, label) {
@@ -637,7 +652,7 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
         ebCheckPreset(audioPresetPath, audioLabel);
 
         app.encoder.launchEncoder();
-        $.sleep(2500);
+        $.sleep(EB_ENCODER_LAUNCH_WAIT_MS);
 
         ebSetAllTrackMutes(sequence, 0);
 
@@ -645,7 +660,7 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
             var videoExtension = ebGetExportExtension(sequence, videoPresetPath, ".mp4");
             var videoPath = ebToFsPath(folderPath + "\\" + sequenceName + "_BACKUP" + videoExtension);
             var hiddenVideoTrackCount = ebHideVideoTracksAbove(sequence, resolvedBackupVideoTrackNumber);
-            var videoJobId = ebQueueSequence(sequence, videoPath, videoPresetPath, workAreaType);
+            var videoJobId = ebQueueSequenceWithSettle(sequence, videoPath, videoPresetPath, workAreaType);
             if (!videoJobId || videoJobId === "0") {
                 ebRestoreMuteStates(sequence, originalMuteStates);
                 return ebResult(false, "Could not queue the MP4 export in Adobe Media Encoder.");
@@ -685,7 +700,7 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
             var exportTrackNumber = i + 1;
             var audioExtension = ebGetExportExtension(sequence, audioPresetPath, "." + resolvedAudioFormat);
             var audioPath = ebToFsPath(folderPath + "\\" + sequenceName + "_Track" + exportTrackNumber + audioExtension);
-            var audioJobId = ebQueueSequence(sequence, audioPath, audioPresetPath, workAreaType);
+            var audioJobId = ebQueueSequenceWithSettle(sequence, audioPath, audioPresetPath, workAreaType);
 
             if (!audioJobId || audioJobId === "0") {
                 notes.push("Failed to queue " + audioLabel + " for Track" + exportTrackNumber + ".");

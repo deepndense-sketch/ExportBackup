@@ -31,7 +31,9 @@ let videoPresetPath = "";
 let mp3PresetPath = "";
 let wavPresetPath = "";
 let localVersion = "unknown";
+let localVersionNotes = "";
 let remoteVersion = null;
+let remoteVersionNotes = "";
 let presetSectionVisible = true;
 let exportMonitorState = null;
 let exportSelectionState = null;
@@ -147,10 +149,11 @@ function setBusyState(nextBusy) {
     }
 }
 
-function setUpdateButton(label, isUpdateAvailable) {
+function setUpdateButton(label, isUpdateAvailable, hoverText) {
     const button = document.getElementById("updateButton");
     button.textContent = label;
     button.disabled = busy || !isUpdateAvailable;
+    button.title = hoverText || "";
     if (isUpdateAvailable) {
         button.classList.add("update-ready");
         button.classList.remove("secondary");
@@ -460,8 +463,10 @@ function readVersionInfo(silent) {
         const raw = fs.readFileSync(getVersionFilePath(), "utf8");
         const parsed = JSON.parse(raw);
         localVersion = parsed.version || "unknown";
+        localVersionNotes = parsed.notes || "";
     } catch (error) {
         localVersion = "unknown";
+        localVersionNotes = "";
         if (!silent) {
             setStatus(`Could not read version file.\n${error.message}`);
         }
@@ -491,7 +496,7 @@ function compareVersions(a, b) {
 
 async function checkForUpdates() {
     const remoteUrl = "https://raw.githubusercontent.com/deepndense-sketch/ExportBackup/main/version.json";
-    setUpdateButton(`Version ${localVersion}`, false);
+    setUpdateButton(`Version ${localVersion}`, false, localVersionNotes);
 
     try {
         const remote = await new Promise((resolve, reject) => {
@@ -518,14 +523,16 @@ async function checkForUpdates() {
         });
 
         remoteVersion = remote.version || "unknown";
+        remoteVersionNotes = remote.notes || "";
 
         if (compareVersions(remoteVersion, localVersion) > 0) {
-            setUpdateButton(`Update to ${remoteVersion}`, true);
+            setUpdateButton(`Update to ${remoteVersion}`, true, remoteVersionNotes);
         } else {
-            setUpdateButton(`Version ${localVersion}`, false);
+            setUpdateButton(`Version ${localVersion}`, false, localVersionNotes);
         }
     } catch (error) {
-        setUpdateButton(`Version ${localVersion}`, false);
+        remoteVersionNotes = "";
+        setUpdateButton(`Version ${localVersion}`, false, localVersionNotes);
     }
 }
 
@@ -1490,7 +1497,7 @@ document.addEventListener("DOMContentLoaded", () => {
     markBackupInputsDirty();
     loadSavedBackupSettings();
     setPresetSectionVisibility(presetSectionVisible);
-    setUpdateButton(`Version ${localVersion}`, false);
+    setUpdateButton(`Version ${localVersion}`, false, localVersionNotes);
     checkForUpdates();
     document.getElementById("videoPresetPath").textContent = videoPresetPath;
     updateAudioPresetDisplay();

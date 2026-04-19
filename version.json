@@ -1,5 +1,5 @@
 {
-  "version": "1.3.12",
+  "version": "1.3.13",
   "channel": "main",
-  "notes": "Release 1.3.12 fixes unchecked audio exports, keeps managed backup tracks muted unless selected, and blocks duplicate backup filenames in the export folder."
+  "notes": "Release 1.3.13 detects managed sequence tracks from aligned clip names, keeps them unchecked and muted by default, and still blocks duplicate backup filenames in the export folder."
 }

@@ -171,6 +171,15 @@ function escapeForEvalScript(value) {
         .replace(/\n/g, "\\n");
 }
 
+function escapeHtml(value) {
+    return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 function callHost(script) {
     return new Promise((resolve) => {
         csInterface.evalScript(script, (result) => resolve(result));
@@ -830,12 +839,23 @@ async function getActiveSequenceName() {
     return String(result || "").trim();
 }
 
-async function validateBackupExportSettings(backupVideoTrackNumber) {
+async function validateBackupExportSettings(backupVideoTrackNumber, selectedItems) {
     if (!(await ensureHostLoaded())) {
         return { ok: false, message: "Could not load Premiere host script." };
     }
 
-    const result = await callHost(`exportBackup.validateBackupExportSettings(${backupVideoTrackNumber})`);
+    const selectedItemsJson = JSON.stringify(selectedItems || getSelectedQueueItems());
+    const result = await callHost(
+        `exportBackup.validateBackupExportSettings(` +
+            `${backupVideoTrackNumber},` +
+            `"${escapeForEvalScript(exportFolder || "")}",` +
+            `"${escapeForEvalScript(videoPresetPath || "")}",` +
+            `"${escapeForEvalScript(mp3PresetPath || "")}",` +
+            `"${escapeForEvalScript(wavPresetPath || "")}",` +
+            `"${escapeForEvalScript(getSelectedAudioFormat())}",` +
+            `"${escapeForEvalScript(selectedItemsJson)}"` +
+        `)`
+    );
     return parseHostResult(result) || { ok: false, message: result || "Unknown validation error." };
 }
 
@@ -873,16 +893,19 @@ function renderExportSelectionList(selectionInfo) {
         const checked = item.selected === false ? "" : "checked";
         const disabled = item.locked ? "disabled" : "";
         const kindLabel = item.kind === "video" ? "Backup video" : `Audio track ${item.trackNumber}`;
-        const detail = item.kind === "video"
+        const detailBase = item.kind === "video"
             ? "Untick this if you do not want to export the backup MP4."
             : "Untick this track if you do not want to export it.";
+        const detail = item.trackName
+            ? `${detailBase} Current track name: ${item.trackName}.`
+            : detailBase;
 
         return (
             `<label class="selection-item" for="${checkboxId}">` +
                 `<input type="checkbox" id="${checkboxId}" data-kind="${item.kind}" data-track-number="${item.trackNumber || 0}" ${checked} ${disabled}>` +
                 `<span>` +
-                    `<strong>${kindLabel}</strong>` +
-                    `<small>${detail}</small>` +
+                    `<strong>${escapeHtml(kindLabel)}</strong>` +
+                    `<small>${escapeHtml(detail)}</small>` +
                 `</span>` +
             `</label>`
         );
@@ -1437,7 +1460,7 @@ async function runExport() {
         return;
     }
 
-    const validation = await validateBackupExportSettings(backupVideoTrackNumber);
+    const validation = await validateBackupExportSettings(backupVideoTrackNumber, selectedQueueItems);
     if (!validation.ok) {
         showBlockingMessage(validation.message || "Backup export validation failed.");
         setStatus(validation.message || "Backup export validation failed.");

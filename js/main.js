@@ -15,6 +15,7 @@ const BACKUP_VIDEO_TRACK_STORAGE_KEY = "exportbackup.backupVideoTrack";
 const ALIGN_VIDEO_TRACK_STORAGE_KEY = "exportbackup.alignVideoTrack";
 const ALIGN_SORT_PROJECT_FILES_STORAGE_KEY = "exportbackup.alignSortProjectFiles";
 const AUDIO_FORMAT_STORAGE_KEY = "exportbackup.audioFormat";
+const REMOVE_SEQUENCE_MARKERS_STORAGE_KEY = "exportbackup.removeSequenceMarkers";
 
 const DEFAULT_BACKUP_VIDEO_TRACK = 5;
 const EXPORT_MANIFEST_SUFFIX = "_ExportBackupMap.json";
@@ -107,6 +108,10 @@ function getAlignVideoTrackInput() {
     return document.getElementById("alignVideoTrackInput");
 }
 
+function getRemoveSequenceMarkersCheckbox() {
+    return document.getElementById("removeSequenceMarkersCheckbox");
+}
+
 function setBusyState(nextBusy) {
     const audioInputs = getAudioFormatInputs();
 
@@ -135,6 +140,10 @@ function setBusyState(nextBusy) {
 
     if (getAlignVideoTrackInput()) {
         getAlignVideoTrackInput().disabled = nextBusy;
+    }
+
+    if (getRemoveSequenceMarkersCheckbox()) {
+        getRemoveSequenceMarkersCheckbox().disabled = nextBusy;
     }
 }
 
@@ -285,6 +294,12 @@ function saveAlignVideoTrack(trackNumber) {
     } catch (error) {}
 }
 
+function saveRemoveSequenceMarkers(enabled) {
+    try {
+        localStorage.setItem(REMOVE_SEQUENCE_MARKERS_STORAGE_KEY, enabled ? "true" : "false");
+    } catch (error) {}
+}
+
 function applyBackupDefaults(defaults, force) {
     const backupTrackInput = getBackupVideoTrackInput();
     if (!backupTrackInput) {
@@ -374,6 +389,24 @@ function bindAlignOptions() {
         try {
             localStorage.setItem(ALIGN_SORT_PROJECT_FILES_STORAGE_KEY, sortCheckbox.checked ? "true" : "false");
         } catch (error) {}
+    });
+}
+
+function bindExportOptions() {
+    const removeMarkersCheckbox = getRemoveSequenceMarkersCheckbox();
+    if (!removeMarkersCheckbox) {
+        return;
+    }
+
+    try {
+        const saved = localStorage.getItem(REMOVE_SEQUENCE_MARKERS_STORAGE_KEY);
+        removeMarkersCheckbox.checked = saved !== "false";
+    } catch (error) {
+        removeMarkersCheckbox.checked = true;
+    }
+
+    removeMarkersCheckbox.addEventListener("change", () => {
+        saveRemoveSequenceMarkers(removeMarkersCheckbox.checked);
     });
 }
 
@@ -706,6 +739,7 @@ function loadSavedPaths() {
 
 function loadSavedBackupSettings() {
     const backupTrackInput = getBackupVideoTrackInput();
+    const removeMarkersCheckbox = getRemoveSequenceMarkersCheckbox();
 
     try {
         const savedTrack = parseInt(localStorage.getItem(BACKUP_VIDEO_TRACK_STORAGE_KEY), 10);
@@ -733,6 +767,15 @@ function loadSavedBackupSettings() {
         setSelectedAudioFormat(savedFormat || "mp3");
     } catch (error) {
         setSelectedAudioFormat("mp3");
+    }
+
+    if (removeMarkersCheckbox) {
+        try {
+            const savedRemoveMarkers = localStorage.getItem(REMOVE_SEQUENCE_MARKERS_STORAGE_KEY);
+            removeMarkersCheckbox.checked = savedRemoveMarkers !== "false";
+        } catch (error) {
+            removeMarkersCheckbox.checked = true;
+        }
     }
 }
 
@@ -1362,6 +1405,7 @@ async function runExport() {
     const selectedAudioPresetPath = selectedAudioFormat === "wav" ? wavPresetPath : mp3PresetPath;
     const backupVideoTrackNumber = getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK);
     const selectedQueueItems = getSelectedQueueItems();
+    const removeSequenceMarkers = !!(getRemoveSequenceMarkersCheckbox() && getRemoveSequenceMarkersCheckbox().checked);
 
     if (!fileExists(videoPresetPath)) {
         alert("The selected video preset file was not found. Choose the video preset again.");
@@ -1375,6 +1419,7 @@ async function runExport() {
 
     saveBackupVideoTrack(backupVideoTrackNumber);
     saveSelectedAudioFormat(selectedAudioFormat);
+    saveRemoveSequenceMarkers(removeSequenceMarkers);
 
     setBusyState(true);
     setStatus("Loading Premiere host script...");
@@ -1396,7 +1441,7 @@ async function runExport() {
     setStatus("Queueing Media Encoder jobs and writing export map...");
 
     const selectedItemsJson = JSON.stringify(selectedQueueItems);
-    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}","${escapeForEvalScript(selectedAudioFormat)}",${backupVideoTrackNumber},"${escapeForEvalScript(selectedItemsJson)}")`;
+    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}","${escapeForEvalScript(selectedAudioFormat)}",${backupVideoTrackNumber},${removeSequenceMarkers ? "true" : "false"},"${escapeForEvalScript(selectedItemsJson)}")`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 
@@ -1441,6 +1486,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadSavedUiState();
     bindAudioFormatInputs();
     bindAlignOptions();
+    bindExportOptions();
     markBackupInputsDirty();
     loadSavedBackupSettings();
     setPresetSectionVisibility(presetSectionVisible);

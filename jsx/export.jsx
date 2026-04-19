@@ -258,6 +258,29 @@ function ebQueueSequenceWithSettle(sequence, outputPath, presetPath, workAreaTyp
     return jobId;
 }
 
+function ebRemoveAllSequenceMarkers(sequence) {
+    var removedCount = 0;
+    var markers = null;
+    var marker = null;
+    var nextMarker = null;
+
+    if (!sequence || !sequence.markers || !sequence.markers.getFirstMarker || !sequence.markers.deleteMarker) {
+        return removedCount;
+    }
+
+    markers = sequence.markers;
+    marker = markers.getFirstMarker();
+
+    while (marker) {
+        nextMarker = markers.getNextMarker ? markers.getNextMarker(marker) : null;
+        markers.deleteMarker(marker);
+        removedCount += 1;
+        marker = nextMarker;
+    }
+
+    return removedCount;
+}
+
 function ebCheckPreset(path, label) {
     var file = new File(ebToFsPath(path));
     if (!file.exists) {
@@ -603,7 +626,7 @@ exportBackup.getAlignmentDefaults = function () {
     }
 };
 
-exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, audioFormat, backupVideoTrackNumber, selectedItemsJson) {
+exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, audioFormat, backupVideoTrackNumber, removeSequenceMarkers, selectedItemsJson) {
     try {
         var sequence = ebGetActiveSequence();
         if (!sequence) {
@@ -631,6 +654,7 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
         var queuedFiles = [];
         var selectedAudioTracks = [];
         var includeBackupVideo = true;
+        var shouldRemoveSequenceMarkers = removeSequenceMarkers !== false && String(removeSequenceMarkers).toLowerCase() !== "false";
         var i;
 
         if (selectedItemsJson) {
@@ -650,6 +674,11 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
 
         ebCheckPreset(videoPresetPath, "Video");
         ebCheckPreset(audioPresetPath, audioLabel);
+
+        if (shouldRemoveSequenceMarkers) {
+            var removedMarkerCount = ebRemoveAllSequenceMarkers(sequence);
+            notes.push("Removed " + removedMarkerCount + " sequence marker" + (removedMarkerCount === 1 ? "" : "s") + " before export.");
+        }
 
         app.encoder.launchEncoder();
         $.sleep(EB_ENCODER_LAUNCH_WAIT_MS);

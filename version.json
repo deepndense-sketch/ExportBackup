@@ -1,5 +1,5 @@
 {
-  "version": "1.3.9",
+  "version": "1.3.10",
   "channel": "main",
-  "notes": "Release 1.3.9 waits 20 seconds for Media Encoder to launch and 10 seconds between queue requests to avoid duplicate split-audio exports."
+  "notes": "Release 1.3.10 adds a checked-by-default option to remove active-sequence markers before export while keeping the longer Media Encoder queue waits."
 }

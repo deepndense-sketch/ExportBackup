@@ -1,5 +1,5 @@
 {
-  "version": "2.0.1",
+  "version": "2.1",
   "channel": "main",
-  "notes": "Release 2.0.1 fixes folder memory for Align Existing, shows existing media paths, improves merge controls, and aligns backup audio after source tracks in order."
+  "notes": "Release 2.1 includes the clean panel update, re-backup replacement, existing media path warnings, folder memory fixes, merge selection controls, and ordered backup alignment after source tracks."
 }

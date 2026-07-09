@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0",
+  "version": "2.0.1",
   "channel": "main",
-  "notes": "Release 2.0.0 updates the backup panel design, adds re-backup replacement, optional project copy, preset-folder defaults, merged audio exports, and cleaner alignment controls."
+  "notes": "Release 2.0.1 fixes folder memory for Align Existing, shows existing media paths, improves merge controls, and aligns backup audio after source tracks in order."
 }

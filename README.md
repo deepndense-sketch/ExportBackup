@@ -1,92 +1,72 @@
-# ExportBackup
+# ExportBackup User Manual
 
-A separate Adobe Premiere Pro CEP extension project for exporting the active sequence.
+ExportBackup helps you make a backup MP4 and separate audio exports from the active Premiere Pro sequence, then brings them back into the project and lines them up.
 
-## Goal
+## Install
 
-This extension is intended to:
+Run `deploy_extension.bat`.
 
-- work on the active sequence
-- require sequence In and Out points before queueing
-- queue an H.264 1080p MP4 backup to Adobe Media Encoder
-- unmute all audio tracks for the MP4 queue job
-- optionally queue each audio track as a separate MP3 and/or WAV export
-- save files using `SequenceName_BACKUP` and `SequenceName_TrackN` naming
-- align matching exported files back onto the active sequence from sequence start
+It installs the panel here:
 
-## Project Structure
+`C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup`
 
-```text
-ExportBackup/
-  CSXS/manifest.xml
-  deploy_extension.bat
-  js/CSInterface.js
-  js/main.js
-  jsx/export.jsx
-  index.html
-  version.json
-  .gitignore
-```
+Restart Premiere Pro after installing.
 
-## Current Status
+## Before Backup
 
-This project now uses Premiere Pro's `app.encoder.encodeSequence()` workflow to send jobs to Adobe Media Encoder.
+1. Open the Premiere Pro sequence you want to backup.
+2. Set the sequence In and Out points.
+3. If any audio track has Solo enabled, turn Solo off before exporting.
+4. Open the ExportBackup panel.
+5. Click `Choose Folder` and select the export folder.
 
-The panel now also includes:
+## Backup
 
-- local version display from `version.json`
-- GitHub update check against the repository `main` branch
-- an `Update From GitHub` action which downloads the latest `main` branch ZIP and installs it into Adobe's CEP extensions folder
-- manual folder-based alignment for files named like `SequenceName_BACKUP.mp4` and `SequenceName_Track1.wav`
-- a deployment batch file for copying the extension into Adobe's CEP extensions folder
+1. Choose `BACKUP TRACK`.
+2. Choose `Premiere` or `Media Encoder`.
+3. Choose `MP3` or `WAV`.
+4. Click `Refresh` to load the track list.
+5. Check the backup video and audio tracks you want to export.
+6. Click `Backup`.
 
-The current alignment workflow is intentionally manual:
+If backup files already exist, use `Re-backup`.
 
-- choose a folder
-- let the panel scan that folder directly
-- match `SequenceName_BACKUP.*`
-- match `SequenceName_TrackN.*`
-- place the backup video at sequence start on a chosen video track
-- place the backup video's own audio at sequence start on a chosen audio track
-- place the other audio files from a chosen start track upward automatically, one track at a time
+## Re-backup
 
-## Presets Used
+Use `Re-backup` when the backup files are already in the project.
 
-- MP4 video defaults to the bundled preset at `presets/1080 AIR.epr`
-- The panel can be pointed at a different video `.epr` preset, and it remembers that choice until changed.
-- MP3 audio defaults to the bundled preset at `presets/mp3.epr`
-- WAV audio defaults to the bundled preset at `presets/wav.epr`
+Re-backup exports new backup files, replaces the old backup files, keeps the correct names, and aligns the new backup media back into the sequence.
 
-## Important Limitation
+## Align Existing
 
-Premiere Pro's official scripting API supports muting audio tracks, but does not document track solo control. This extension can clear mutes for the MP4 queue job, but any solo state should be cleared manually in Premiere before running the tool.
+Use `Align Existing` when the files were already exported and you only want to import and align them.
 
-Track deletion is also not supported reliably through Premiere's official scripting API, so alignment works by placing files onto user-selected target tracks rather than deleting existing tracks.
+Click `Choose Folder` first, then click `Align Existing`.
 
-## Updating Installed Extensions
+## Merge Audio Tracks
 
-The intended installed location is:
+Use the Merge checkboxes on the right side of the track list.
 
-- `%APPDATA%\Adobe\CEP\extensions\ExportBackup`
+1. Tick the audio tracks you want to merge together.
+2. Click `Merge Selection`.
+3. Merged tracks fade and stay locked as one group.
 
-The panel checks GitHub on load by comparing local `version.json` against:
+Other audio tracks can still be selected normally.
 
-- `https://raw.githubusercontent.com/deepndense-sketch/ExportBackup/main/version.json`
+## Presets
 
-When `Update From GitHub` is used, the updater script downloads:
+The panel uses presets from the `presets` folder inside the extension.
 
-- `https://github.com/deepndense-sketch/ExportBackup/archive/refs/heads/main.zip`
+Click `Show Presets` only if you need to change the preset files.
 
-It then extracts that ZIP and mirrors the contents into the installed CEP extension folder:
+## Extra Options
 
-- `%APPDATA%\Adobe\CEP\extensions\ExportBackup`
+- `Remove sequence markers`: removes sequence markers during backup.
+- `Copy project file`: copies the Premiere project file to the backup folder.
+- `Sort project files`: organizes imported backup files.
 
-Using the AppData CEP folder avoids most `Program Files` permission problems during updates.
+## Updates
 
-## Release Archives
+The version button shows the installed version.
 
-Released snapshots are now stored in a sibling folder next to the repo by default:
-
-- `..\ExportBackup_Versions\<version>`
-
-Use `archive_release.ps1` from the repo root to copy the current project into that versioned archive folder and save a small `release-info.json` file with the version and commit.
+When a new update is available, the button changes color. Click it to update from GitHub.

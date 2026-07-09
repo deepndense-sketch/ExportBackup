@@ -117,7 +117,7 @@ function getBackupVideoTrackInput() {
 }
 
 function getAlignVideoTrackInput() {
-    return document.getElementById("exportVideoTrackInput") || document.getElementById("alignVideoTrackInput");
+    return document.getElementById("exportVideoTrackInput");
 }
 
 function getRemoveSequenceMarkersCheckbox() {
@@ -254,6 +254,30 @@ function parseHostResult(raw) {
 
 function showBlockingMessage(message) {
     alert(message);
+}
+
+function formatExistingMediaMessage(validation) {
+    const conflicts = Array.isArray(validation && validation.conflicts) ? validation.conflicts : [];
+    const seen = {};
+    const paths = [];
+
+    conflicts.forEach((conflict) => {
+        const conflictPath = conflict && conflict.path ? String(conflict.path) : "";
+        if (!conflictPath || seen[conflictPath]) {
+            return;
+        }
+
+        seen[conflictPath] = true;
+        paths.push(conflictPath);
+    });
+
+    if (!paths.length) {
+        return validation && validation.message
+            ? `${validation.message}\nUse Re-backup to replace it.`
+            : "Media already exists. Use Re-backup to replace it.";
+    }
+
+    return `Media already exists. Use Re-backup to replace it.\n\nPath:\n${paths.join("\n")}`;
 }
 
 function fileExists(filePath) {
@@ -404,21 +428,11 @@ function applyBackupDefaults(defaults, force) {
 }
 
 function applyAlignDefaults(defaults, force) {
-    const alignTrackInput = getAlignVideoTrackInput();
-    if (!alignTrackInput) {
-        return;
-    }
-
     const value = Math.max(
         1,
         parseInt((defaults && defaults.videoTrackNumber) || DEFAULT_BACKUP_VIDEO_TRACK, 10) || DEFAULT_BACKUP_VIDEO_TRACK
     );
-
-    if (force || alignTrackInput.dataset.userEdited !== "true") {
-        alignTrackInput.value = String(value);
-        alignTrackInput.dataset.autoValue = String(value);
-        saveAlignVideoTrack(value);
-    }
+    saveAlignVideoTrack(value);
 }
 
 function markBackupInputsDirty() {
@@ -436,7 +450,7 @@ function markBackupInputsDirty() {
     if (alignTrackInput) {
         alignTrackInput.addEventListener("input", () => {
             alignTrackInput.dataset.userEdited = "true";
-            saveAlignVideoTrack(getPositiveIntValue("alignVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK));
+            saveAlignVideoTrack(getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK));
         });
     }
 }
@@ -847,13 +861,14 @@ function loadSavedPaths() {
         const savedExportFolder = localStorage.getItem(EXPORT_FOLDER_STORAGE_KEY);
         if (savedExportFolder && savedExportFolder.trim()) {
             exportFolder = savedExportFolder;
+            alignFolder = savedExportFolder;
             document.getElementById("exportPath").textContent = exportFolder;
         }
     } catch (error) {}
 
     try {
         const savedAlignFolder = localStorage.getItem(ALIGN_FOLDER_STORAGE_KEY);
-        if (savedAlignFolder && savedAlignFolder.trim()) {
+        if (!exportFolder && savedAlignFolder && savedAlignFolder.trim()) {
             alignFolder = savedAlignFolder;
             const alignPathElement = document.getElementById("alignPath");
             if (alignPathElement) {
@@ -1054,9 +1069,12 @@ function renderExportSelectionList(selectionInfo) {
         const disabled = item.locked ? "disabled" : "";
         const kindLabel = item.kind === "video" ? "Backup video" : `Audio track ${item.trackNumber}`;
         const detail = item.kind === "audio" && item.trackName ? item.trackName : "";
-        const mergeControl = item.kind === "audio"
-            ? `<label class="merge-checkbox-wrap" for="${mergeCheckboxId}"><span>Merge</span><input class="merge-checkbox" type="checkbox" id="${mergeCheckboxId}" data-kind="audio" data-track-number="${item.trackNumber || 0}" data-merged-group=""></label>`
-            : `<span></span>`;
+        let mergeControl = `<span></span>`;
+        if (item.kind === "video") {
+            mergeControl = `<button id="mergeAudioButton" class="secondary selection-list-merge-button" type="button" onclick="mergeSelectedAudioTracks()">Merge Selection</button>`;
+        } else if (item.kind === "audio") {
+            mergeControl = `<label class="merge-checkbox-wrap" for="${mergeCheckboxId}"><span>Merge</span><input class="merge-checkbox" type="checkbox" id="${mergeCheckboxId}" data-kind="audio" data-track-number="${item.trackNumber || 0}" data-merged-group=""></label>`;
+        }
 
         return (
             `<div class="selection-item">` +
@@ -1107,7 +1125,7 @@ function mergeSelectedAudioTracks() {
             if (small) {
                 small.textContent = label;
             } else {
-                item.querySelector("span").insertAdjacentHTML("beforeend", `<small>${escapeHtml(label)}</small>`);
+                item.querySelector("label").insertAdjacentHTML("beforeend", `<small>${escapeHtml(label)}</small>`);
             }
         }
     });
@@ -1297,26 +1315,74 @@ function removeFileIfExists(filePath) {
     } catch (error) {}
 }
 
-function finalizeRebackupFiles(manifest) {
+function sleepSync(ms) {
+    const waitUntil = Date.now() + ms;
+    while (Date.now() < waitUntil) {}
+}
+
+function replaceRebackupFile(entry) {
+    const attempts = 45;
+    let lastError = null;
+
+    for (let i = 0; i < attempts; i += 1) {
+        try {
+            if (!fileExists(entry.path)) {
+                throw new Error(`New backup file was not found:\n${entry.path}`);
+            }
+
+            if (fileExists(entry.finalPath)) {
+                fs.unlinkSync(entry.finalPath);
+            }
+
+            fs.renameSync(entry.path, entry.finalPath);
+            return { ok: true };
+        } catch (error) {
+            lastError = error;
+            sleepSync(1000);
+        }
+    }
+
+    throw new Error(
+        "Could not replace the old backup file. ExportBackup will not import TEMP files.\n" +
+        `New file: ${entry.path}\n` +
+        `Old file: ${entry.finalPath}\n` +
+        `Last error: ${lastError ? lastError.message : "unknown"}`
+    );
+}
+
+async function finalizeRebackupFiles(manifest) {
     const expectedFiles = manifest && Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
 
-    expectedFiles.forEach((entry) => {
+    for (let i = 0; i < expectedFiles.length; i += 1) {
+        const entry = expectedFiles[i];
         if (!entry || !entry.path || !entry.finalPath || entry.path === entry.finalPath) {
-            return;
+            continue;
         }
 
-        if (!fileExists(entry.path)) {
-            throw new Error(`New backup file was not found:\n${entry.path}`);
-        }
-
-        removeFileIfExists(entry.finalPath);
-        fs.renameSync(entry.path, entry.finalPath);
+        replaceRebackupFile(entry);
         entry.path = entry.finalPath;
         entry.name = path.basename(entry.finalPath);
-    });
+    }
 
     manifest.rebackupFinalized = true;
     return manifest;
+}
+
+async function prepareRebackupReplacement(manifest) {
+    if (!manifest || !Array.isArray(manifest.expectedFiles) || !manifest.expectedFiles.length) {
+        return;
+    }
+
+    if (!(await ensureHostLoaded())) {
+        throw new Error("Could not load Premiere host script before replacing old backup files.");
+    }
+
+    const expectedFilesJson = JSON.stringify(manifest.expectedFiles);
+    const result = await callHost(`exportBackup.prepareRebackupReplacement("${escapeForEvalScript(expectedFilesJson)}")`);
+    const parsed = parseHostResult(result);
+    if (!parsed || parsed.ok === false) {
+        throw new Error((parsed && parsed.message) || "Could not prepare old backup media for replacement.");
+    }
 }
 
 function updateAlignFolder(folderPath) {
@@ -1442,7 +1508,7 @@ async function runAlignmentFlow(folderPath, options) {
         }
 
         const backupVideoTrackNumber = getPositiveIntValue(
-            "alignVideoTrackInput",
+            "exportVideoTrackInput",
             (matchInfo.manifest && parseInt(matchInfo.manifest.backupVideoTrackNumber, 10)) || DEFAULT_BACKUP_VIDEO_TRACK
         );
         saveAlignVideoTrack(backupVideoTrackNumber);
@@ -1556,7 +1622,8 @@ async function monitorExportCompletion() {
         clearExportCompletionMonitor();
         if (state.manifest.rebackup) {
             try {
-                finalizeRebackupFiles(state.manifest);
+                await prepareRebackupReplacement(state.manifest);
+                await finalizeRebackupFiles(state.manifest);
                 writeExportManifest(state.manifest);
             } catch (error) {
                 setStatus(`Re-backup finished exporting, but replacing old files failed.\n${error.message}`);
@@ -1608,8 +1675,10 @@ async function chooseExportFolder() {
     const result = window.cep.fs.showOpenDialogEx(false, true, "Choose Export Folder");
     if (result.data && result.data.length > 0) {
         exportFolder = result.data[0];
+        alignFolder = exportFolder;
         try {
             localStorage.setItem(EXPORT_FOLDER_STORAGE_KEY, exportFolder);
+            localStorage.setItem(ALIGN_FOLDER_STORAGE_KEY, alignFolder);
         } catch (error) {}
         document.getElementById("exportPath").textContent = exportFolder;
         setStatus("Export folder selected. Ready.");
@@ -1717,7 +1786,7 @@ async function runExport(isRebackup) {
     const validation = await validateBackupExportSettings(backupVideoTrackNumber, selectedQueueItems, isRebackup);
     if (!validation.ok) {
         const message = validation.hasConflicts && !isRebackup
-            ? "Backup files are already there. Use Re-backup to replace them."
+            ? formatExistingMediaMessage(validation)
             : (validation.message || "Backup export validation failed.");
         showBlockingMessage(message);
         setStatus(message);
@@ -1726,8 +1795,8 @@ async function runExport(isRebackup) {
     }
 
     setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
-        ? (isRebackup ? "Rendering re-backup files in Premiere Pro..." : "Rendering backup files in Premiere Pro...")
-        : (isRebackup ? "Queueing re-backup jobs..." : "Queueing Media Encoder jobs and writing export map..."));
+        ? (isRebackup ? "Rendering re-backup files in Premiere Pro...\nUsing existing backup track." : `Rendering backup files in Premiere Pro...\nBackup track: V${backupVideoTrackNumber}`)
+        : (isRebackup ? "Queueing re-backup jobs...\nUsing existing backup track." : `Queueing backup jobs...\nBackup track: V${backupVideoTrackNumber}`));
 
     const selectedItemsJson = JSON.stringify(selectedQueueItems);
     const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}","${escapeForEvalScript(selectedAudioFormat)}",${backupVideoTrackNumber},${removeSequenceMarkers ? "true" : "false"},"${escapeForEvalScript(selectedItemsJson)}","${escapeForEvalScript(selectedExportMode)}",${isRebackup ? "true" : "false"})`;
@@ -1745,7 +1814,8 @@ async function runExport(isRebackup) {
     try {
         const manifest = createExportManifestFromHostResult(parsed);
         if (manifest.rebackup && parsed.exportMode === EXPORT_MODE_PREMIERE) {
-            finalizeRebackupFiles(manifest);
+            await prepareRebackupReplacement(manifest);
+            await finalizeRebackupFiles(manifest);
         }
         manifest.manifestPath = writeExportManifest(manifest);
         updateAlignFolder(exportFolder);
@@ -1775,7 +1845,7 @@ async function alignExistingFolder() {
         return;
     }
 
-    await runAlignmentFlow(alignFolder || exportFolder, {
+    await runAlignmentFlow(exportFolder || alignFolder, {
         skipVideo: false,
         autoTriggered: false
     });

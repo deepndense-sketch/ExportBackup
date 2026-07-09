@@ -71,6 +71,11 @@ p {
     font-size: 12px;
 }
 
+.small-note strong {
+    color: #ffd18c;
+    font-weight: inherit;
+}
+
 .warning {
     color: var(--warning);
 }
@@ -121,6 +126,12 @@ p {
     text-align: center;
 }
 
+.track-warning {
+    color: var(--warning);
+    font-size: 12px;
+    font-weight: 800;
+}
+
 button {
     border: 0;
     border-radius: 12px;
@@ -135,21 +146,87 @@ button {
 button.secondary,
 button.preset-button,
 .text-toggle {
+    padding: 9px 12px;
+    font-size: 12px;
     background: var(--panel-soft);
     color: var(--text);
     border: 1px solid var(--line);
 }
 
+#exportButton {
+    background: linear-gradient(135deg, #ff9d57, #ff6d1f);
+}
+
+#rebackupButton {
+    padding: 13px 18px;
+    font-size: inherit;
+    background: rgba(255, 157, 87, 0.16);
+    color: #e8bd96;
+    border-color: rgba(255, 157, 87, 0.24);
+}
+
+#alignFolderButton {
+    padding: 13px 18px;
+    font-size: inherit;
+    background: rgba(255, 192, 111, 0.15);
+    color: #e8c998;
+    border-color: rgba(255, 192, 111, 0.22);
+}
+
+#mergeAudioButton {
+    background: rgba(111, 183, 255, 0.15);
+    color: #b8d6f6;
+    border-color: rgba(111, 183, 255, 0.24);
+}
+
+#mergeAudioButton.selection-list-merge-button {
+    justify-self: end;
+    padding: 3px 8px;
+    border-radius: 8px;
+    font-size: 11px;
+    line-height: 1.1;
+}
+
+#refreshExportSelectionButton {
+    padding: 9px 12px;
+    font-size: 12px;
+    background: rgba(99, 214, 139, 0.14);
+    color: #bdeccc;
+    border-color: rgba(99, 214, 139, 0.24);
+}
+
+#chooseFolderButton {
+    background: rgba(47, 58, 70, 0.62);
+    color: var(--text);
+    border-color: rgba(154, 168, 184, 0.22);
+}
+
+#updateButton {
+    background: rgba(48, 56, 68, 0.58);
+    color: var(--text);
+    border-color: rgba(154, 168, 184, 0.2);
+}
+
+#chooseVideoPresetButton,
+#chooseMp3PresetButton,
+#chooseWavPresetButton {
+    background: rgba(49, 64, 77, 0.5);
+    color: #bfd2e3;
+    border-color: rgba(97, 168, 255, 0.18);
+}
+
 button.preset-button,
-.text-toggle {
+button.preset-button {
     padding: 13px 18px;
     font-size: inherit;
 }
 
 .text-toggle {
-    background: linear-gradient(135deg, #7b61ff, var(--violet));
-    color: #f8f6ff;
-    border: 1px solid rgba(180, 140, 255, 0.45);
+    padding: 9px 12px;
+    font-size: 12px;
+    background: var(--panel-soft);
+    color: var(--text);
+    border: 1px solid var(--line);
 }
 
 input[type="checkbox"],
@@ -416,7 +493,28 @@ button:disabled {
         <div class="track-row">
             <label for="exportVideoTrackInput">BACKUP TRACK</label>
             <input id="exportVideoTrackInput" type="number" min="1" value="5">
+            <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh</button>
+            <button id="togglePresetSectionButton" class="text-toggle" onclick="togglePresetSection()">Show Presets</button>
         </div>
+
+        <div id="presetSection" class="stack">
+            <div class="action-line">
+                <button id="chooseVideoPresetButton" class="preset-button" onclick="chooseVideoPreset()">Video Preset</button>
+                <div class="path-box action-value value-text" id="videoPresetPath"></div>
+            </div>
+
+            <div class="action-line">
+                <button id="chooseMp3PresetButton" class="preset-button" onclick="chooseMp3Preset()">MP3 Preset</button>
+                <div class="path-box action-value value-text" id="mp3PresetPath"></div>
+            </div>
+
+            <div class="action-line">
+                <button id="chooseWavPresetButton" class="preset-button" onclick="chooseWavPreset()">WAV Preset</button>
+                <div class="path-box action-value value-text" id="wavPresetPath"></div>
+            </div>
+        </div>
+
+        <div class="small-note">Turn off any <strong>soloed audio tracks</strong> before export. Use <strong>Re-backup</strong> to replace existing backup media. Use <strong>Align Existing</strong> to import and align files that were already exported. Use <strong>Merge Selection</strong> after ticking audio tracks you want grouped together.</div>
 
         <div class="settings-strip">
             <div class="setting-group export">
@@ -450,6 +548,7 @@ button:disabled {
                 <button id="rebackupButton" class="secondary" onclick="runExport(true)">Re-backup</button>
                 <button id="alignFolderButton" class="secondary" onclick="alignExistingFolder()">Align Existing</button>
             </div>
+            <div class="track-warning">IF HAVE SOLO TRACK: UNCHECK TO EXPORT</div>
             <div id="exportSelectionList" class="selection-list">
                 <div class="small-note">Refresh to load tracks.</div>
             </div>
@@ -475,30 +574,6 @@ button:disabled {
             </label>
         </div>
 
-        <div class="row">
-            <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh</button>
-            <button id="mergeAudioButton" class="secondary" onclick="mergeSelectedAudioTracks()">Merge</button>
-            <button id="togglePresetSectionButton" class="text-toggle" onclick="togglePresetSection()">Show Presets</button>
-        </div>
-
-        <div id="presetSection" class="stack">
-            <div class="action-line">
-                <button id="chooseVideoPresetButton" class="preset-button" onclick="chooseVideoPreset()">Video Preset</button>
-                <div class="path-box action-value value-text" id="videoPresetPath"></div>
-            </div>
-
-            <div class="action-line">
-                <button id="chooseMp3PresetButton" class="preset-button" onclick="chooseMp3Preset()">MP3 Preset</button>
-                <div class="path-box action-value value-text" id="mp3PresetPath"></div>
-            </div>
-
-            <div class="action-line">
-                <button id="chooseWavPresetButton" class="preset-button" onclick="chooseWavPreset()">WAV Preset</button>
-                <div class="path-box action-value value-text" id="wavPresetPath"></div>
-            </div>
-        </div>
-
-        <input id="alignVideoTrackInput" class="is-hidden" type="number" min="1" value="5">
     </section>
 
     <section class="card stack">

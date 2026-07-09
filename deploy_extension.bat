@@ -3,10 +3,17 @@ setlocal
 
 set "SRC=%~dp0"
 if "%SRC:~-1%"=="\" set "SRC=%SRC:~0,-1%"
-set "DEST=%APPDATA%\Adobe\CEP\extensions\ExportBackup"
+set "DEST=C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup"
 set "RC=0"
 
 title ExportBackup Deploy
+
+net session >nul 2>&1
+if errorlevel 1 (
+    echo Requesting administrator permission...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b 0
+)
 
 echo Source: %SRC%
 echo Destination: %DEST%

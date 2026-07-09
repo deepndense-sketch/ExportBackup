@@ -16,8 +16,12 @@ const ALIGN_VIDEO_TRACK_STORAGE_KEY = "exportbackup.alignVideoTrack";
 const ALIGN_SORT_PROJECT_FILES_STORAGE_KEY = "exportbackup.alignSortProjectFiles";
 const AUDIO_FORMAT_STORAGE_KEY = "exportbackup.audioFormat";
 const REMOVE_SEQUENCE_MARKERS_STORAGE_KEY = "exportbackup.removeSequenceMarkers";
+const EXPORT_MODE_STORAGE_KEY = "exportbackup.exportMode";
+const COPY_PROJECT_FILE_STORAGE_KEY = "exportbackup.copyProjectFile";
 
 const DEFAULT_BACKUP_VIDEO_TRACK = 5;
+const EXPORT_MODE_PREMIERE = "premiere";
+const EXPORT_MODE_MEDIA_ENCODER = "mediaEncoder";
 const EXPORT_MANIFEST_SUFFIX = "_ExportBackupMap.json";
 const EXPORT_MONITOR_INTERVAL_MS = 5000;
 const EXPORT_MONITOR_STABLE_PASSES = 2;
@@ -37,12 +41,14 @@ let remoteVersionNotes = "";
 let presetSectionVisible = true;
 let exportMonitorState = null;
 let exportSelectionState = null;
+let mergedAudioGroups = [];
+let nextMergedAudioGroupId = 1;
 
 function getExtensionRootPath() {
     try {
         return csInterface.getSystemPath(SystemPath.EXTENSION);
     } catch (error) {
-        return __dirname;
+        return path.basename(__dirname).toLowerCase() === "js" ? path.dirname(__dirname) : __dirname;
     }
 }
 
@@ -56,6 +62,10 @@ function getUpdateScriptPath() {
 
 function getBundledPresetPath(fileName) {
     return path.join(getExtensionRootPath(), "presets", fileName);
+}
+
+function getBundledPresetFolderPath() {
+    return path.join(getExtensionRootPath(), "presets");
 }
 
 function getDefaultVideoPresetPath() {
@@ -107,28 +117,54 @@ function getBackupVideoTrackInput() {
 }
 
 function getAlignVideoTrackInput() {
-    return document.getElementById("alignVideoTrackInput");
+    return document.getElementById("exportVideoTrackInput") || document.getElementById("alignVideoTrackInput");
 }
 
 function getRemoveSequenceMarkersCheckbox() {
     return document.getElementById("removeSequenceMarkersCheckbox");
 }
 
+function getCopyProjectFileCheckbox() {
+    return document.getElementById("copyProjectFileCheckbox");
+}
+
+function getExportModeInputs() {
+    return {
+        premiere: document.getElementById("exportModePremiere"),
+        mediaEncoder: document.getElementById("exportModeMediaEncoder")
+    };
+}
+
 function setBusyState(nextBusy) {
     const audioInputs = getAudioFormatInputs();
+    const setDisabled = (id, disabled) => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.disabled = disabled;
+        }
+    };
 
     busy = nextBusy;
-    document.getElementById("chooseFolderButton").disabled = nextBusy;
-    document.getElementById("chooseVideoPresetButton").disabled = nextBusy;
-    document.getElementById("chooseMp3PresetButton").disabled = nextBusy;
-    document.getElementById("chooseWavPresetButton").disabled = nextBusy;
-    document.getElementById("exportButton").disabled = nextBusy;
-    document.getElementById("chooseAlignFolderButton").disabled = nextBusy;
-    document.getElementById("alignFolderButton").disabled = nextBusy;
-    document.getElementById("alignSkipVideoCheckbox").disabled = nextBusy;
-    document.getElementById("alignSortProjectFilesCheckbox").disabled = nextBusy;
-    document.getElementById("refreshExportSelectionButton").disabled = nextBusy;
-    document.getElementById("updateButton").disabled = nextBusy;
+    setDisabled("chooseFolderButton", nextBusy);
+    setDisabled("chooseVideoPresetButton", nextBusy);
+    setDisabled("chooseMp3PresetButton", nextBusy);
+    setDisabled("chooseWavPresetButton", nextBusy);
+    setDisabled("exportButton", nextBusy);
+    setDisabled("rebackupButton", nextBusy);
+    setDisabled("chooseAlignFolderButton", nextBusy);
+    setDisabled("alignFolderButton", nextBusy);
+    setDisabled("alignSkipVideoCheckbox", nextBusy);
+    setDisabled("alignSortProjectFilesCheckbox", nextBusy);
+    setDisabled("refreshExportSelectionButton", nextBusy);
+    setDisabled("mergeAudioButton", nextBusy);
+    setDisabled("updateButton", nextBusy);
+
+    const exportModeInputs = getExportModeInputs();
+    Object.keys(exportModeInputs).forEach((key) => {
+        if (exportModeInputs[key]) {
+            exportModeInputs[key].disabled = nextBusy;
+        }
+    });
 
     Object.keys(audioInputs).forEach((key) => {
         if (audioInputs[key]) {
@@ -146,6 +182,10 @@ function setBusyState(nextBusy) {
 
     if (getRemoveSequenceMarkersCheckbox()) {
         getRemoveSequenceMarkersCheckbox().disabled = nextBusy;
+    }
+
+    if (getCopyProjectFileCheckbox()) {
+        getCopyProjectFileCheckbox().disabled = nextBusy;
     }
 }
 
@@ -259,6 +299,39 @@ function getManifestPath(folderPath, baseName) {
 function getSelectedAudioFormat() {
     const audioInputs = getAudioFormatInputs();
     return audioInputs.wav && audioInputs.wav.checked ? "wav" : "mp3";
+}
+
+function normalizeExportMode(mode) {
+    return String(mode || "").toLowerCase() === EXPORT_MODE_PREMIERE.toLowerCase()
+        ? EXPORT_MODE_PREMIERE
+        : EXPORT_MODE_MEDIA_ENCODER;
+}
+
+function getSelectedExportMode() {
+    const inputs = getExportModeInputs();
+    return inputs.premiere && inputs.premiere.checked ? EXPORT_MODE_PREMIERE : EXPORT_MODE_MEDIA_ENCODER;
+}
+
+function setSelectedExportMode(mode) {
+    const inputs = getExportModeInputs();
+    const resolved = normalizeExportMode(mode);
+
+    if (inputs.premiere) {
+        inputs.premiere.checked = resolved === EXPORT_MODE_PREMIERE;
+    }
+
+    if (inputs.mediaEncoder) {
+        inputs.mediaEncoder.checked = resolved === EXPORT_MODE_MEDIA_ENCODER;
+    }
+}
+
+function saveSelectedExportMode(mode) {
+    const resolved = normalizeExportMode(mode);
+    setSelectedExportMode(resolved);
+
+    try {
+        localStorage.setItem(EXPORT_MODE_STORAGE_KEY, resolved);
+    } catch (error) {}
 }
 
 function setSelectedAudioFormat(format) {
@@ -380,6 +453,9 @@ function bindAudioFormatInputs() {
         input.addEventListener("change", () => {
             if (input.checked) {
                 saveSelectedAudioFormat(input.value);
+            } else {
+                setSelectedAudioFormat(key === "mp3" ? "wav" : "mp3");
+                saveSelectedAudioFormat(getSelectedAudioFormat());
             }
         });
     });
@@ -406,20 +482,51 @@ function bindAlignOptions() {
 
 function bindExportOptions() {
     const removeMarkersCheckbox = getRemoveSequenceMarkersCheckbox();
-    if (!removeMarkersCheckbox) {
-        return;
+    const copyProjectCheckbox = getCopyProjectFileCheckbox();
+
+    if (removeMarkersCheckbox) {
+        try {
+            const saved = localStorage.getItem(REMOVE_SEQUENCE_MARKERS_STORAGE_KEY);
+            removeMarkersCheckbox.checked = saved !== "false";
+        } catch (error) {
+            removeMarkersCheckbox.checked = true;
+        }
+
+        removeMarkersCheckbox.addEventListener("change", () => {
+            saveRemoveSequenceMarkers(removeMarkersCheckbox.checked);
+        });
     }
 
-    try {
-        const saved = localStorage.getItem(REMOVE_SEQUENCE_MARKERS_STORAGE_KEY);
-        removeMarkersCheckbox.checked = saved !== "false";
-    } catch (error) {
-        removeMarkersCheckbox.checked = true;
-    }
+    const exportModeInputs = getExportModeInputs();
+    Object.keys(exportModeInputs).forEach((key) => {
+        const input = exportModeInputs[key];
+        if (!input) {
+            return;
+        }
 
-    removeMarkersCheckbox.addEventListener("change", () => {
-        saveRemoveSequenceMarkers(removeMarkersCheckbox.checked);
+        input.addEventListener("change", () => {
+            if (input.checked) {
+                saveSelectedExportMode(input.value);
+            } else {
+                setSelectedExportMode(key === "premiere" ? EXPORT_MODE_MEDIA_ENCODER : EXPORT_MODE_PREMIERE);
+                saveSelectedExportMode(getSelectedExportMode());
+            }
+        });
     });
+
+    if (copyProjectCheckbox) {
+        try {
+            copyProjectCheckbox.checked = localStorage.getItem(COPY_PROJECT_FILE_STORAGE_KEY) === "true";
+        } catch (error) {
+            copyProjectCheckbox.checked = false;
+        }
+
+        copyProjectCheckbox.addEventListener("change", () => {
+            try {
+                localStorage.setItem(COPY_PROJECT_FILE_STORAGE_KEY, copyProjectCheckbox.checked ? "true" : "false");
+            } catch (error) {}
+        });
+    }
 }
 
 async function refreshSuggestedBackupTrack(force) {
@@ -748,7 +855,10 @@ function loadSavedPaths() {
         const savedAlignFolder = localStorage.getItem(ALIGN_FOLDER_STORAGE_KEY);
         if (savedAlignFolder && savedAlignFolder.trim()) {
             alignFolder = savedAlignFolder;
-            document.getElementById("alignPath").textContent = alignFolder;
+            const alignPathElement = document.getElementById("alignPath");
+            if (alignPathElement) {
+                alignPathElement.textContent = alignFolder;
+            }
         }
     } catch (error) {}
 }
@@ -783,6 +893,13 @@ function loadSavedBackupSettings() {
         setSelectedAudioFormat(savedFormat || "mp3");
     } catch (error) {
         setSelectedAudioFormat("mp3");
+    }
+
+    try {
+        const savedExportMode = localStorage.getItem(EXPORT_MODE_STORAGE_KEY);
+        setSelectedExportMode(savedExportMode || EXPORT_MODE_MEDIA_ENCODER);
+    } catch (error) {
+        setSelectedExportMode(EXPORT_MODE_MEDIA_ENCODER);
     }
 
     if (removeMarkersCheckbox) {
@@ -830,6 +947,45 @@ function updateAudioPresetDisplay() {
     document.getElementById("wavPresetPath").textContent = wavPresetPath;
 }
 
+function getPresetDialogStartFolder(currentPresetPath) {
+    try {
+        if (currentPresetPath && fileExists(currentPresetPath)) {
+            return path.dirname(currentPresetPath);
+        }
+
+        if (currentPresetPath) {
+            const currentFolder = path.dirname(currentPresetPath);
+            if (currentFolder && fs.existsSync(currentFolder)) {
+                return currentFolder;
+            }
+        }
+    } catch (error) {}
+
+    return getBundledPresetFolderPath();
+}
+
+function choosePresetFile(title, currentPresetPath) {
+    const startFolder = getPresetDialogStartFolder(currentPresetPath);
+    let previousCwd = "";
+
+    try {
+        previousCwd = process.cwd();
+        if (startFolder && fs.existsSync(startFolder)) {
+            process.chdir(startFolder);
+        }
+    } catch (error) {}
+
+    try {
+        return window.cep.fs.showOpenDialogEx(false, false, title, startFolder, ["epr"]);
+    } finally {
+        try {
+            if (previousCwd) {
+                process.chdir(previousCwd);
+            }
+        } catch (error) {}
+    }
+}
+
 async function getActiveSequenceName() {
     if (!(await ensureHostLoaded())) {
         return "";
@@ -839,7 +995,7 @@ async function getActiveSequenceName() {
     return String(result || "").trim();
 }
 
-async function validateBackupExportSettings(backupVideoTrackNumber, selectedItems) {
+async function validateBackupExportSettings(backupVideoTrackNumber, selectedItems, allowExistingFiles) {
     if (!(await ensureHostLoaded())) {
         return { ok: false, message: "Could not load Premiere host script." };
     }
@@ -853,7 +1009,8 @@ async function validateBackupExportSettings(backupVideoTrackNumber, selectedItem
             `"${escapeForEvalScript(mp3PresetPath || "")}",` +
             `"${escapeForEvalScript(wavPresetPath || "")}",` +
             `"${escapeForEvalScript(getSelectedAudioFormat())}",` +
-            `"${escapeForEvalScript(selectedItemsJson)}"` +
+            `"${escapeForEvalScript(selectedItemsJson)}",` +
+            `${allowExistingFiles ? "true" : "false"}` +
         `)`
     );
     return parseHostResult(result) || { ok: false, message: result || "Unknown validation error." };
@@ -881,6 +1038,8 @@ function renderExportSelectionList(selectionInfo) {
     }
 
     exportSelectionState = selectionInfo;
+    mergedAudioGroups = [];
+    nextMergedAudioGroupId = 1;
     const items = Array.isArray(selectionInfo.items) ? selectionInfo.items : [];
 
     if (!items.length) {
@@ -890,26 +1049,70 @@ function renderExportSelectionList(selectionInfo) {
 
     container.innerHTML = items.map((item, index) => {
         const checkboxId = `exportSelectionItem_${index}`;
-        const checked = item.selected === false ? "" : "checked";
+        const mergeCheckboxId = `mergeSelectionItem_${index}`;
+        const checked = item.kind === "video" || item.selected !== false ? "checked" : "";
         const disabled = item.locked ? "disabled" : "";
         const kindLabel = item.kind === "video" ? "Backup video" : `Audio track ${item.trackNumber}`;
-        const detailBase = item.kind === "video"
-            ? "Untick this if you do not want to export the backup MP4."
-            : "Untick this track if you do not want to export it.";
-        const detail = item.trackName
-            ? `${detailBase} Current track name: ${item.trackName}.`
-            : detailBase;
+        const detail = item.kind === "audio" && item.trackName ? item.trackName : "";
+        const mergeControl = item.kind === "audio"
+            ? `<label class="merge-checkbox-wrap" for="${mergeCheckboxId}"><span>Merge</span><input class="merge-checkbox" type="checkbox" id="${mergeCheckboxId}" data-kind="audio" data-track-number="${item.trackNumber || 0}" data-merged-group=""></label>`
+            : `<span></span>`;
 
         return (
-            `<label class="selection-item" for="${checkboxId}">` +
-                `<input type="checkbox" id="${checkboxId}" data-kind="${item.kind}" data-track-number="${item.trackNumber || 0}" ${checked} ${disabled}>` +
-                `<span>` +
+            `<div class="selection-item">` +
+                `<input class="queue-checkbox" type="checkbox" id="${checkboxId}" data-kind="${item.kind}" data-track-number="${item.trackNumber || 0}" ${checked} ${disabled}>` +
+                `<label for="${checkboxId}">` +
                     `<strong>${escapeHtml(kindLabel)}</strong>` +
-                    `<small>${escapeHtml(detail)}</small>` +
-                `</span>` +
-            `</label>`
+                    (detail ? `<small>${escapeHtml(detail)}</small>` : "") +
+                `</label>` +
+                mergeControl +
+            `</div>`
         );
     }).join("");
+}
+
+function getUnmergedCheckedAudioInputs() {
+    const container = document.getElementById("exportSelectionList");
+    if (!container) {
+        return [];
+    }
+
+    return Array.prototype.slice.call(container.querySelectorAll(".merge-checkbox[data-kind='audio']:checked"))
+        .filter((input) => !input.getAttribute("data-merged-group"));
+}
+
+function mergeSelectedAudioTracks() {
+    const inputs = getUnmergedCheckedAudioInputs();
+    if (inputs.length < 2) {
+        setStatus("Select two or more audio tracks, then click Merge.");
+        return;
+    }
+
+    const groupId = `g${nextMergedAudioGroupId++}`;
+    const trackNumbers = inputs
+        .map((input) => parseInt(input.getAttribute("data-track-number"), 10) || 0)
+        .filter((trackNumber) => trackNumber > 0)
+        .sort((a, b) => a - b);
+
+    mergedAudioGroups.push({ id: groupId, trackNumbers });
+
+    inputs.forEach((input) => {
+        input.setAttribute("data-merged-group", groupId);
+        input.disabled = true;
+        const item = input.closest(".selection-item");
+        if (item) {
+            item.classList.add("is-merged");
+            const small = item.querySelector("small");
+            const label = `Merged group: ${trackNumbers.join(", ")}`;
+            if (small) {
+                small.textContent = label;
+            } else {
+                item.querySelector("span").insertAdjacentHTML("beforeend", `<small>${escapeHtml(label)}</small>`);
+            }
+        }
+    });
+
+    setStatus(`Merged audio tracks: ${trackNumbers.join(", ")}.`);
 }
 
 function getSelectedAudioTrackNumbers() {
@@ -918,18 +1121,26 @@ function getSelectedAudioTrackNumbers() {
         return [];
     }
 
-    return Array.prototype.slice.call(container.querySelectorAll("input[type='checkbox'][data-kind='audio']:checked"))
+    const groupedTrackNumbers = {};
+    mergedAudioGroups.forEach((group) => {
+        group.trackNumbers.forEach((trackNumber) => {
+            groupedTrackNumbers[trackNumber] = true;
+        });
+    });
+
+    return Array.prototype.slice.call(container.querySelectorAll(".queue-checkbox[data-kind='audio']:checked"))
         .map((input) => parseInt(input.getAttribute("data-track-number"), 10) || 0)
-        .filter((trackNumber) => trackNumber > 0);
+        .filter((trackNumber) => trackNumber > 0 && !groupedTrackNumbers[trackNumber]);
 }
 
 function getSelectedQueueItems() {
     const container = document.getElementById("exportSelectionList");
-    const videoInput = container ? container.querySelector("input[type='checkbox'][data-kind='video']") : null;
+    const videoInput = container ? container.querySelector(".queue-checkbox[data-kind='video']") : null;
 
     return {
         includeVideo: videoInput ? !!videoInput.checked : true,
-        audioTracks: getSelectedAudioTrackNumbers()
+        audioTracks: getSelectedAudioTrackNumbers(),
+        audioGroups: mergedAudioGroups.map((group) => group.trackNumbers)
     };
 }
 
@@ -1086,9 +1297,34 @@ function removeFileIfExists(filePath) {
     } catch (error) {}
 }
 
+function finalizeRebackupFiles(manifest) {
+    const expectedFiles = manifest && Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
+
+    expectedFiles.forEach((entry) => {
+        if (!entry || !entry.path || !entry.finalPath || entry.path === entry.finalPath) {
+            return;
+        }
+
+        if (!fileExists(entry.path)) {
+            throw new Error(`New backup file was not found:\n${entry.path}`);
+        }
+
+        removeFileIfExists(entry.finalPath);
+        fs.renameSync(entry.path, entry.finalPath);
+        entry.path = entry.finalPath;
+        entry.name = path.basename(entry.finalPath);
+    });
+
+    manifest.rebackupFinalized = true;
+    return manifest;
+}
+
 function updateAlignFolder(folderPath) {
     alignFolder = folderPath;
-    document.getElementById("alignPath").textContent = folderPath || "No folder selected yet.";
+    const alignPathElement = document.getElementById("alignPath");
+    if (alignPathElement) {
+        alignPathElement.textContent = folderPath || "No folder selected yet.";
+    }
 
     try {
         if (folderPath) {
@@ -1106,6 +1342,8 @@ function createExportManifestFromHostResult(parsed) {
         baseName: parsed.baseName || sanitizeSequenceName(parsed.sequenceName || "Active_Sequence"),
         backupVideoTrackNumber: parseInt(parsed.backupVideoTrackNumber, 10) || DEFAULT_BACKUP_VIDEO_TRACK,
         audioFormat: parsed.audioFormat || getSelectedAudioFormat(),
+        exportMode: parsed.exportMode || getSelectedExportMode(),
+        rebackup: parsed.rebackup === true,
         expectedFiles: Array.isArray(parsed.queuedFiles) ? parsed.queuedFiles : [],
         manifestPath: "",
         projectName: parsed.projectName || "",
@@ -1163,13 +1401,13 @@ async function runAlignmentFlow(folderPath, options) {
     const settings = options || {};
 
     if (!folderPath) {
-        alert("Choose an align folder first.");
+        alert("Choose an export folder first.");
         return false;
     }
 
     setBusyState(true);
     setStatus(settings.autoTriggered
-        ? "Media Encoder finished. Importing and aligning backup files..."
+        ? "Export finished. Importing and aligning backup files..."
         : "Loading Premiere host script...");
 
     try {
@@ -1208,7 +1446,8 @@ async function runAlignmentFlow(folderPath, options) {
             (matchInfo.manifest && parseInt(matchInfo.manifest.backupVideoTrackNumber, 10)) || DEFAULT_BACKUP_VIDEO_TRACK
         );
         saveAlignVideoTrack(backupVideoTrackNumber);
-        const skipBackupVideo = settings.skipVideo === true || document.getElementById("alignSkipVideoCheckbox").checked;
+        const skipVideoCheckbox = document.getElementById("alignSkipVideoCheckbox");
+        const skipBackupVideo = settings.skipVideo === true || (skipVideoCheckbox && skipVideoCheckbox.checked);
         const sortProjectFiles = settings.sortProjectFiles === true || document.getElementById("alignSortProjectFilesCheckbox").checked;
         const resolvedVideoPath = skipBackupVideo ? "" : (matchInfo.videoPath || "");
         const audioJson = JSON.stringify(matchInfo.audio);
@@ -1223,7 +1462,10 @@ async function runAlignmentFlow(folderPath, options) {
             return false;
         }
 
-        const copyResult = copyProjectToFolder(parsed.projectPath, folderPath);
+        const shouldCopyProject = !!(getCopyProjectFileCheckbox() && getCopyProjectFileCheckbox().checked);
+        const copyResult = shouldCopyProject
+            ? copyProjectToFolder(parsed.projectPath, folderPath)
+            : { ok: false, message: "" };
         if (matchInfo.manifest && matchInfo.manifest.manifestPath) {
             removeFileIfExists(matchInfo.manifest.manifestPath);
         }
@@ -1312,6 +1554,16 @@ async function monitorExportCompletion() {
 
     if (allStable) {
         clearExportCompletionMonitor();
+        if (state.manifest.rebackup) {
+            try {
+                finalizeRebackupFiles(state.manifest);
+                writeExportManifest(state.manifest);
+            } catch (error) {
+                setStatus(`Re-backup finished exporting, but replacing old files failed.\n${error.message}`);
+                showBlockingMessage("Re-backup file replacement failed.");
+                return;
+            }
+        }
         await runAlignmentFlow(state.manifest.folderPath, {
             manifest: state.manifest,
             skipVideo: false,
@@ -1390,7 +1642,7 @@ async function chooseVideoPreset() {
         return;
     }
 
-    const result = window.cep.fs.showOpenDialogEx(false, false, "Choose Premiere Video Preset (.epr)", null, ["epr"]);
+    const result = choosePresetFile("Choose Premiere Video Preset (.epr)", videoPresetPath);
     if (result.data && result.data.length > 0) {
         saveVideoPreset(result.data[0]);
         setStatus("Video preset updated. This choice will be remembered until you change it.");
@@ -1402,7 +1654,7 @@ async function chooseMp3Preset() {
         return;
     }
 
-    const result = window.cep.fs.showOpenDialogEx(false, false, "Choose Premiere MP3 Preset (.epr)", null, ["epr"]);
+    const result = choosePresetFile("Choose Premiere MP3 Preset (.epr)", mp3PresetPath);
     if (result.data && result.data.length > 0) {
         saveMp3Preset(result.data[0]);
         setStatus("MP3 preset updated. This choice will be remembered until you change it.");
@@ -1414,14 +1666,14 @@ async function chooseWavPreset() {
         return;
     }
 
-    const result = window.cep.fs.showOpenDialogEx(false, false, "Choose Premiere WAV Preset (.epr)", null, ["epr"]);
+    const result = choosePresetFile("Choose Premiere WAV Preset (.epr)", wavPresetPath);
     if (result.data && result.data.length > 0) {
         saveWavPreset(result.data[0]);
         setStatus("WAV preset updated. This choice will be remembered until you change it.");
     }
 }
 
-async function runExport() {
+async function runExport(isRebackup) {
     if (busy) {
         return;
     }
@@ -1436,6 +1688,7 @@ async function runExport() {
     const backupVideoTrackNumber = getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK);
     const selectedQueueItems = getSelectedQueueItems();
     const removeSequenceMarkers = !!(getRemoveSequenceMarkersCheckbox() && getRemoveSequenceMarkersCheckbox().checked);
+    const selectedExportMode = getSelectedExportMode();
 
     if (!fileExists(videoPresetPath)) {
         alert("The selected video preset file was not found. Choose the video preset again.");
@@ -1450,6 +1703,7 @@ async function runExport() {
     saveBackupVideoTrack(backupVideoTrackNumber);
     saveSelectedAudioFormat(selectedAudioFormat);
     saveRemoveSequenceMarkers(removeSequenceMarkers);
+    saveSelectedExportMode(selectedExportMode);
 
     setBusyState(true);
     setStatus("Loading Premiere host script...");
@@ -1460,18 +1714,23 @@ async function runExport() {
         return;
     }
 
-    const validation = await validateBackupExportSettings(backupVideoTrackNumber, selectedQueueItems);
+    const validation = await validateBackupExportSettings(backupVideoTrackNumber, selectedQueueItems, isRebackup);
     if (!validation.ok) {
-        showBlockingMessage(validation.message || "Backup export validation failed.");
-        setStatus(validation.message || "Backup export validation failed.");
+        const message = validation.hasConflicts && !isRebackup
+            ? "Backup files are already there. Use Re-backup to replace them."
+            : (validation.message || "Backup export validation failed.");
+        showBlockingMessage(message);
+        setStatus(message);
         setBusyState(false);
         return;
     }
 
-    setStatus("Queueing Media Encoder jobs and writing export map...");
+    setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
+        ? (isRebackup ? "Rendering re-backup files in Premiere Pro..." : "Rendering backup files in Premiere Pro...")
+        : (isRebackup ? "Queueing re-backup jobs..." : "Queueing Media Encoder jobs and writing export map..."));
 
     const selectedItemsJson = JSON.stringify(selectedQueueItems);
-    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}","${escapeForEvalScript(selectedAudioFormat)}",${backupVideoTrackNumber},${removeSequenceMarkers ? "true" : "false"},"${escapeForEvalScript(selectedItemsJson)}")`;
+    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}","${escapeForEvalScript(selectedAudioFormat)}",${backupVideoTrackNumber},${removeSequenceMarkers ? "true" : "false"},"${escapeForEvalScript(selectedItemsJson)}","${escapeForEvalScript(selectedExportMode)}",${isRebackup ? "true" : "false"})`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 
@@ -1485,11 +1744,24 @@ async function runExport() {
 
     try {
         const manifest = createExportManifestFromHostResult(parsed);
+        if (manifest.rebackup && parsed.exportMode === EXPORT_MODE_PREMIERE) {
+            finalizeRebackupFiles(manifest);
+        }
         manifest.manifestPath = writeExportManifest(manifest);
         updateAlignFolder(exportFolder);
         applyBackupDefaults({ videoTrackNumber: manifest.backupVideoTrackNumber }, false);
-        setBusyState(false);
-        startExportCompletionMonitor(manifest);
+        if (parsed.exportMode === EXPORT_MODE_PREMIERE) {
+            setBusyState(false);
+            await runAlignmentFlow(exportFolder, {
+                manifest,
+                skipVideo: false,
+                sortProjectFiles: false,
+                autoTriggered: true
+            });
+        } else {
+            setBusyState(false);
+            startExportCompletionMonitor(manifest);
+        }
     } catch (error) {
         setBusyState(false);
         const message = `Queue created, but the export map could not be written.\n${error.message}`;
@@ -1503,7 +1775,7 @@ async function alignExistingFolder() {
         return;
     }
 
-    await runAlignmentFlow(alignFolder, {
+    await runAlignmentFlow(alignFolder || exportFolder, {
         skipVideo: false,
         autoTriggered: false
     });

@@ -10,9 +10,12 @@
     --panel-soft: #252c35;
     --line: #323b46;
     --text: #edf2f7;
-    --muted: #98a7b8;
+    --muted: #9aa8b8;
     --accent: #ff8a3d;
     --accent-strong: #ff6d1f;
+    --blue: #61a8ff;
+    --green: #63d68b;
+    --violet: #b48cff;
     --warning: #ffd18c;
 }
 
@@ -45,59 +48,31 @@ body {
 .card {
     background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
     border: 1px solid var(--line);
-    border-radius: 18px;
-    padding: 20px;
-}
-
-.eyebrow {
-    margin: 0 0 10px;
-    font-size: 12px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--accent);
-}
-
-h1,
-h2 {
-    margin: 0 0 10px;
-}
-
-h1 {
-    font-size: 34px;
-    line-height: 1.05;
+    border-radius: 14px;
+    padding: 18px;
 }
 
 h2 {
-    font-size: 24px;
+    margin: 0;
+    font-size: 22px;
 }
 
 p {
     margin: 0;
-    line-height: 1.5;
+    line-height: 1.45;
 }
 
-.muted {
+.muted,
+.small-note {
     color: var(--muted);
+}
+
+.small-note {
+    font-size: 12px;
 }
 
 .warning {
     color: var(--warning);
-}
-
-.meta-row {
-    display: flex;
-    gap: 14px;
-    flex-wrap: wrap;
-    color: var(--muted);
-    font-size: 13px;
-    align-items: center;
-}
-
-.title-row {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    align-items: center;
 }
 
 .stack {
@@ -105,24 +80,45 @@ p {
     gap: 14px;
 }
 
-.two-column {
-    display: grid;
-    grid-template-columns: 1.2fr 0.8fr;
-    gap: 16px;
-}
-
-.row {
+.row,
+.inline-options {
     display: flex;
     gap: 12px;
     flex-wrap: wrap;
     align-items: center;
 }
 
-.compact-row {
-    display: flex;
+.nowrap {
+    flex-wrap: nowrap;
+}
+
+.track-row {
+    display: inline-flex;
     gap: 8px;
-    flex-wrap: wrap;
     align-items: center;
+    width: auto;
+    max-width: none;
+}
+
+.track-row label {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.track-row input {
+    height: 38px;
+    width: 64px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 138, 61, 0.45);
+    background: #202731;
+    color: var(--text);
+    padding: 8px 12px;
+    font: inherit;
+    font-size: 17px;
+    font-weight: 800;
+    text-align: center;
 }
 
 button {
@@ -136,49 +132,61 @@ button {
     color: #151515;
 }
 
-button.secondary {
+button.secondary,
+button.preset-button,
+.text-toggle {
     background: var(--panel-soft);
     color: var(--text);
     border: 1px solid var(--line);
 }
 
-button.preset-button {
-    padding: 9px 12px;
-    border-radius: 10px;
-    font-size: 12px;
-    font-weight: 600;
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--muted);
-    border: 1px solid var(--line);
-}
-
-button.preset-button:hover {
-    color: var(--text);
-    border-color: rgba(255, 138, 61, 0.45);
+button.preset-button,
+.text-toggle {
+    padding: 13px 18px;
+    font-size: inherit;
 }
 
 .text-toggle {
-    background: transparent;
-    color: var(--muted);
-    border: 1px solid var(--line);
-    padding: 8px 12px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
+    background: linear-gradient(135deg, #7b61ff, var(--violet));
+    color: #f8f6ff;
+    border: 1px solid rgba(180, 140, 255, 0.45);
 }
 
-.text-toggle:hover {
-    color: var(--text);
-    border-color: rgba(255, 138, 61, 0.45);
+input[type="checkbox"],
+input[type="radio"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 13px;
+    height: 13px;
+    flex: 0 0 13px;
+    display: inline-grid;
+    place-content: center;
+    margin: 0;
+    border: 1px solid #d8e1ec;
+    border-radius: 3px;
+    background: #f7fbff;
 }
 
-.button-stack {
-    display: grid;
-    gap: 10px;
+input[type="checkbox"]::after,
+input[type="radio"]::after {
+    content: "";
+    width: 7px;
+    height: 4px;
+    border-left: 2px solid #151515;
+    border-bottom: 2px solid #151515;
+    transform: rotate(-45deg) scale(0);
+    transform-origin: center;
 }
 
-.is-hidden {
-    display: none;
+input[type="checkbox"]:checked,
+input[type="radio"]:checked {
+    border-color: var(--accent);
+    background: var(--accent);
+}
+
+input[type="checkbox"]:checked::after,
+input[type="radio"]:checked::after {
+    transform: rotate(-45deg) scale(1);
 }
 
 button.update-ready {
@@ -196,6 +204,10 @@ button:disabled {
     cursor: default;
 }
 
+.is-hidden {
+    display: none;
+}
+
 .path-box,
 .status-box {
     background: var(--panel);
@@ -206,13 +218,8 @@ button:disabled {
 }
 
 .status-box {
-    min-height: 180px;
+    min-height: 160px;
     white-space: pre-wrap;
-}
-
-.detail-stack {
-    display: grid;
-    gap: 12px;
 }
 
 .action-line {
@@ -223,7 +230,7 @@ button:disabled {
 }
 
 .action-value {
-    min-height: 42px;
+    min-height: 40px;
     display: flex;
     align-items: center;
 }
@@ -232,24 +239,55 @@ button:disabled {
     font-size: 12px;
     line-height: 1.4;
     color: #cfd8e3;
-    word-break: break-word;
-}
-
-.small-note {
-    font-size: 12px;
-    color: var(--muted);
 }
 
 .option {
     display: flex;
-    gap: 10px;
-    align-items: flex-start;
+    gap: 8px;
+    align-items: center;
     color: var(--muted);
     font-size: 13px;
 }
 
-.option input {
-    margin-top: 3px;
+.settings-strip {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.setting-group {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid rgba(154, 168, 184, 0.22);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.setting-group.export {
+    border-color: rgba(97, 168, 255, 0.28);
+}
+
+.setting-group.audio {
+    border-color: rgba(99, 214, 139, 0.26);
+}
+
+.setting-label {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.setting-group.export input[type="checkbox"]:checked {
+    border-color: var(--blue);
+    background: var(--blue);
+}
+
+.setting-group.audio input[type="checkbox"]:checked {
+    border-color: var(--green);
+    background: var(--green);
 }
 
 .field {
@@ -280,19 +318,25 @@ button:disabled {
     margin-bottom: 4px;
 }
 
-@media (max-width: 860px) {
-    .two-column {
-        grid-template-columns: 1fr;
-    }
+.section-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+}
 
-    .action-line {
-        grid-template-columns: 1fr;
-    }
+.section-heading .section-label {
+    margin-bottom: 0;
+}
+
+.section-heading #updateButton {
+    padding: 8px 12px;
+    font-size: 12px;
 }
 
 .selection-list {
     display: grid;
-    gap: 10px;
+    gap: 8px;
     padding: 14px;
     border: 1px solid var(--line);
     border-radius: 14px;
@@ -300,7 +344,8 @@ button:disabled {
 }
 
 .selection-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 10px;
     align-items: center;
     color: var(--text);
@@ -308,14 +353,11 @@ button:disabled {
 }
 
 .selection-item input {
-    flex: 0 0 auto;
     margin: 0;
 }
 
-.selection-item span {
-    flex: 1 1 auto;
+.selection-item > label {
     min-width: 0;
-    display: block;
 }
 
 .selection-item strong {
@@ -329,11 +371,32 @@ button:disabled {
     color: var(--muted);
     display: block;
     line-height: 1.35;
-    margin-top: 2px;
 }
 
-.selection-list.is-disabled {
-    opacity: 0.55;
+.selection-item.is-merged {
+    opacity: 0.48;
+}
+
+.selection-item.is-merged .merge-checkbox {
+    pointer-events: none;
+}
+
+.merge-checkbox-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+@media (max-width: 860px) {
+    .action-line {
+        grid-template-columns: 1fr;
+    }
+
+    .nowrap {
+        flex-wrap: wrap;
+    }
 }
 </style>
 <script src="js/CSInterface.js"></script>
@@ -343,129 +406,99 @@ button:disabled {
 <div class="app">
     <section class="card stack">
         <div>
-            <p class="eyebrow">Premiere Pro Extension</p>
-            <div class="title-row">
-                <h1>ExportBackup</h1>
+            <div class="section-heading">
+                <div class="section-label">Backup</div>
                 <button id="updateButton" class="secondary" onclick="runGithubUpdate()">Version ...</button>
             </div>
-            <p class="muted">Queue a backup package for the active sequence in Adobe Media Encoder.</p>
-        </div>
-    </section>
-
-    <section class="card stack">
-        <div>
-            <div class="section-label">Align</div>
-            <h2>Align Existing Export Folder</h2>
-            <p class="muted">Import and align backup exports, then save the project and copy it to the export folder.</p>
-        </div>
-
-        <div class="action-line">
-            <button id="chooseAlignFolderButton" class="secondary" onclick="chooseAlignFolder()">Choose Existing Export Folder</button>
-            <div class="path-box action-value value-text" id="alignPath">No folder selected yet.</div>
-        </div>
-
-        <div class="two-column">
-            <div class="stack">
-                <label class="option">
-                    <input type="checkbox" id="alignSkipVideoCheckbox">
-                    <span>Skip importing the backup video file and only align audio files.</span>
-                </label>
-
-                <label class="option">
-                    <input type="checkbox" id="alignSortProjectFilesCheckbox">
-                    <span>Sort loose non-sequence project files after backup import.</span>
-                </label>
-
-                <div class="field">
-                    <label for="alignVideoTrackInput">Backup MP4 video track for this manual align</label>
-                    <input id="alignVideoTrackInput" type="number" min="1" value="5">
-                </div>
-            </div>
-
-            <div class="small-note">This manual align is for late imports after export is already finished. ExportBackup still tries to remember the same backup MP4 video track from export, but you can change it here if needed. Backup MP4 audio goes to the first new audio track after your current sequence audio, and the rest of the exported audio files go to the tracks after that automatically.</div>
-        </div>
-
-        <div class="row">
-            <button id="alignFolderButton" onclick="alignExistingFolder()">Start Backup Media Import and Align To Project</button>
-        </div>
-    </section>
-
-    <section class="card stack">
-        <div>
-            <div class="section-label">Backup</div>
             <h2>Queue Backup Exports</h2>
-            <p class="muted">Send the backup MP4 and one set of split audio exports to Adobe Media Encoder, then let ExportBackup import and align them automatically after the queue finishes.</p>
         </div>
 
-        <div class="action-line">
-            <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Export Folder</button>
-            <div class="path-box action-value value-text" id="exportPath">No folder selected yet.</div>
+        <div class="track-row">
+            <label for="exportVideoTrackInput">BACKUP TRACK</label>
+            <input id="exportVideoTrackInput" type="number" min="1" value="5">
         </div>
 
-        <div class="row">
-            <button id="togglePresetSectionButton" class="text-toggle" onclick="togglePresetSection()">Hide Presets</button>
-        </div>
-
-        <div id="presetSection" class="stack">
-            <div class="action-line">
-                <button id="chooseVideoPresetButton" class="preset-button" onclick="chooseVideoPreset()">Choose Video Preset</button>
-                <div class="path-box action-value value-text" id="videoPresetPath"></div>
+        <div class="settings-strip">
+            <div class="setting-group export">
+                <span class="setting-label">Export With</span>
+                <label class="option">
+                    <input type="checkbox" id="exportModePremiere" value="premiere">
+                    <span>Premiere</span>
+                </label>
+                <label class="option">
+                    <input type="checkbox" id="exportModeMediaEncoder" value="mediaEncoder" checked>
+                    <span>Media&nbsp;Encoder</span>
+                </label>
             </div>
 
-            <div class="action-line">
-                <button id="chooseMp3PresetButton" class="preset-button" onclick="chooseMp3Preset()">Choose MP3 Preset</button>
-                <div class="path-box action-value value-text" id="mp3PresetPath"></div>
+            <div class="setting-group audio">
+                <label class="option">
+                    <input type="checkbox" id="audioFormatMp3" value="mp3" checked>
+                    <span>MP3</span>
+                </label>
+                <label class="option">
+                    <input type="checkbox" id="audioFormatWav" value="wav">
+                    <span>WAV</span>
+                </label>
             </div>
-
-            <div class="action-line">
-                <button id="chooseWavPresetButton" class="preset-button" onclick="chooseWavPreset()">Choose WAV Preset</button>
-                <div class="path-box action-value value-text" id="wavPresetPath"></div>
-            </div>
-        </div>
-
-        <div class="two-column">
-            <div class="field">
-                <label for="exportVideoTrackInput">Choose the video track where your backup MP4 should go so the layers above it stay hidden in the backup.</label>
-                <input id="exportVideoTrackInput" type="number" min="1" value="5">
-            </div>
-
-            <div class="detail-stack">
-                <div class="field">
-                    <label>Audio Export Format</label>
-                    <label class="option">
-                        <input type="radio" id="audioFormatMp3" name="audioFormat" value="mp3" checked>
-                        <span>Export each used audio track as an MP3 file.</span>
-                    </label>
-                    <label class="option">
-                        <input type="radio" id="audioFormatWav" name="audioFormat" value="wav">
-                        <span>Export each used audio track as a WAV file.</span>
-                    </label>
-                </div>
-            </div>
-        </div>
-
-        <div class="row">
-            <label class="option">
-                <input type="checkbox" id="removeSequenceMarkersCheckbox" checked>
-                <span>Remove all markers from the active sequence before export starts.</span>
-            </label>
-        </div>
-
-        <div class="row">
-            <button id="exportButton" onclick="runExport()">Start Backup Queue</button>
         </div>
 
         <div class="stack">
             <div class="section-label">Queue Preview</div>
-            <div class="row">
-                <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh Export Selection</button>
+            <div class="row nowrap">
+                <button id="exportButton" onclick="runExport(false)">Backup</button>
+                <button id="rebackupButton" class="secondary" onclick="runExport(true)">Re-backup</button>
+                <button id="alignFolderButton" class="secondary" onclick="alignExistingFolder()">Align Existing</button>
             </div>
             <div id="exportSelectionList" class="selection-list">
-                <div class="small-note">Choose which files should be sent to Media Encoder. The backup MP4 stays selected, and all used audio tracks start selected by default.</div>
+                <div class="small-note">Refresh to load tracks.</div>
             </div>
         </div>
 
-        <p class="warning">Exports use sequence In/Out for encoding. The backup MP4 uses the chosen video track, each audio export is created only for tracks that actually contain clips, and ExportBackup watches the export folder so it can import and align everything automatically when Media Encoder finishes.</p>
+        <div class="action-line">
+            <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Folder</button>
+            <div class="path-box action-value value-text" id="exportPath">No folder selected yet.</div>
+        </div>
+
+        <div class="inline-options">
+            <label class="option">
+                <input type="checkbox" id="removeSequenceMarkersCheckbox" checked>
+                <span>Remove sequence markers</span>
+            </label>
+            <label class="option">
+                <input type="checkbox" id="copyProjectFileCheckbox">
+                <span>Copy project file</span>
+            </label>
+            <label class="option">
+                <input type="checkbox" id="alignSortProjectFilesCheckbox">
+                <span>Sort project files</span>
+            </label>
+        </div>
+
+        <div class="row">
+            <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh</button>
+            <button id="mergeAudioButton" class="secondary" onclick="mergeSelectedAudioTracks()">Merge</button>
+            <button id="togglePresetSectionButton" class="text-toggle" onclick="togglePresetSection()">Show Presets</button>
+        </div>
+
+        <div id="presetSection" class="stack">
+            <div class="action-line">
+                <button id="chooseVideoPresetButton" class="preset-button" onclick="chooseVideoPreset()">Video Preset</button>
+                <div class="path-box action-value value-text" id="videoPresetPath"></div>
+            </div>
+
+            <div class="action-line">
+                <button id="chooseMp3PresetButton" class="preset-button" onclick="chooseMp3Preset()">MP3 Preset</button>
+                <div class="path-box action-value value-text" id="mp3PresetPath"></div>
+            </div>
+
+            <div class="action-line">
+                <button id="chooseWavPresetButton" class="preset-button" onclick="chooseWavPreset()">WAV Preset</button>
+                <div class="path-box action-value value-text" id="wavPresetPath"></div>
+            </div>
+        </div>
+
+        <input id="alignVideoTrackInput" class="is-hidden" type="number" min="1" value="5">
     </section>
 
     <section class="card stack">

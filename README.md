@@ -37,6 +37,8 @@ Use `Re-backup` when the backup files are already in the project.
 
 Re-backup exports new backup files, replaces the old backup files, keeps the correct names, and aligns the new backup media back into the sequence.
 
+For re-backup, the queue checkboxes and merge selections are ignored. ExportBackup records the existing backup clips before export, uses the `_BACKUP` clip only as a video layer, keeps its attached audio muted, and exports audio only from the original source tracks. After replacement, the backup video, muted video audio, and separate audio files return to their recorded tracks and timeline start positions.
+
 ## Align Existing
 
 Use `Align Existing` when the files were already exported and you only want to import and align them.

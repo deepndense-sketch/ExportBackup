@@ -1172,22 +1172,39 @@ async function refreshExportSelection() {
     renderExportSelectionList(selectionInfo);
 }
 
-function parseTrackNumberFromFileName(name, baseName) {
+function parseTrackNumbersFromFileName(name, baseName) {
     const lowerName = String(name || "").toLowerCase();
     const lowerBase = String(baseName || "").toLowerCase();
     const prefix = `${lowerBase}_track`;
 
     if (!lowerName.startsWith(prefix)) {
-        return 0;
+        return [];
     }
 
     const remainder = name.substring(prefix.length);
     const dotIndex = remainder.lastIndexOf(".");
     if (dotIndex <= 0) {
-        return 0;
+        return [];
     }
 
-    return parseInt(remainder.substring(0, dotIndex), 10) || 0;
+    const seen = {};
+    return remainder.substring(0, dotIndex)
+        .split("-")
+        .map((part) => parseInt(part, 10) || 0)
+        .filter((trackNumber) => {
+            if (trackNumber < 1 || seen[trackNumber]) {
+                return false;
+            }
+
+            seen[trackNumber] = true;
+            return true;
+        })
+        .sort((a, b) => a - b);
+}
+
+function parseTrackNumberFromFileName(name, baseName) {
+    const trackNumbers = parseTrackNumbersFromFileName(name, baseName);
+    return trackNumbers.length ? trackNumbers[0] : 0;
 }
 
 function normalizeAudioEntries(entries, baseName) {
@@ -1199,7 +1216,23 @@ function normalizeAudioEntries(entries, baseName) {
         }
 
         const fileName = entry.name || path.basename(entry.path);
-        const trackNumber = parseInt(entry.trackNumber, 10) || parseTrackNumberFromFileName(fileName, baseName);
+        const parsedTrackNumbers = parseTrackNumbersFromFileName(fileName, baseName);
+        const rawTrackNumbers = Array.isArray(entry.trackNumbers) && entry.trackNumbers.length
+            ? entry.trackNumbers
+            : (parsedTrackNumbers.length ? parsedTrackNumbers : [entry.trackNumber]);
+        const seenTrackNumbers = {};
+        const trackNumbers = rawTrackNumbers
+            .map((value) => parseInt(value, 10) || 0)
+            .filter((trackNumber) => {
+                if (trackNumber < 1 || seenTrackNumbers[trackNumber]) {
+                    return false;
+                }
+
+                seenTrackNumbers[trackNumber] = true;
+                return true;
+            })
+            .sort((a, b) => a - b);
+        const trackNumber = trackNumbers.length ? trackNumbers[0] : 0;
         if (trackNumber < 1) {
             return;
         }
@@ -1207,6 +1240,7 @@ function normalizeAudioEntries(entries, baseName) {
         normalized.push({
             path: entry.path,
             trackNumber,
+            trackNumbers,
             name: fileName
         });
     });
@@ -1260,6 +1294,7 @@ function scanExportFolderForSequence(folderPath, sequenceName, manifest) {
                 audio.push({
                     path: entry.path,
                     trackNumber: parseInt(entry.trackNumber, 10) || 0,
+                    trackNumbers: Array.isArray(entry.trackNumbers) ? entry.trackNumbers : [],
                     name: entry.name || path.basename(entry.path)
                 });
             }
@@ -1275,11 +1310,13 @@ function scanExportFolderForSequence(folderPath, sequenceName, manifest) {
             return;
         }
 
-        const trackNumber = parseTrackNumberFromFileName(fileName, sanitizedBase);
+        const trackNumbers = parseTrackNumbersFromFileName(fileName, sanitizedBase);
+        const trackNumber = trackNumbers.length ? trackNumbers[0] : 0;
         if (trackNumber > 0 && !audio.some((entry) => entry.path === absolutePath)) {
             audio.push({
                 path: absolutePath,
                 trackNumber,
+                trackNumbers,
                 name: fileName
             });
         }
@@ -1401,7 +1438,7 @@ function updateAlignFolder(folderPath) {
 
 function createExportManifestFromHostResult(parsed) {
     return {
-        version: 2,
+        version: 3,
         createdAt: new Date().toISOString(),
         folderPath: exportFolder,
         sequenceName: parsed.sequenceName || "",
@@ -1410,6 +1447,7 @@ function createExportManifestFromHostResult(parsed) {
         audioFormat: parsed.audioFormat || getSelectedAudioFormat(),
         exportMode: parsed.exportMode || getSelectedExportMode(),
         rebackup: parsed.rebackup === true,
+        rebackupLayout: parsed.rebackupLayout || null,
         expectedFiles: Array.isArray(parsed.queuedFiles) ? parsed.queuedFiles : [],
         manifestPath: "",
         projectName: parsed.projectName || "",
@@ -1517,7 +1555,12 @@ async function runAlignmentFlow(folderPath, options) {
         const sortProjectFiles = settings.sortProjectFiles === true || document.getElementById("alignSortProjectFilesCheckbox").checked;
         const resolvedVideoPath = skipBackupVideo ? "" : (matchInfo.videoPath || "");
         const audioJson = JSON.stringify(matchInfo.audio);
-        const script = `exportBackup.alignMappedFiles("${escapeForEvalScript(resolvedVideoPath)}","${escapeForEvalScript(audioJson)}",${backupVideoTrackNumber},${sortProjectFiles})`;
+        const rebackupLayoutJson = JSON.stringify(
+            matchInfo.manifest && matchInfo.manifest.rebackup === true
+                ? (matchInfo.manifest.rebackupLayout || null)
+                : null
+        );
+        const script = `exportBackup.alignMappedFiles("${escapeForEvalScript(resolvedVideoPath)}","${escapeForEvalScript(audioJson)}",${backupVideoTrackNumber},${sortProjectFiles},"${escapeForEvalScript(rebackupLayoutJson)}")`;
         const result = await callHost(script);
         const parsed = parseHostResult(result);
 
@@ -1795,8 +1838,8 @@ async function runExport(isRebackup) {
     }
 
     setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
-        ? (isRebackup ? "Rendering re-backup files in Premiere Pro...\nUsing existing backup track." : `Rendering backup files in Premiere Pro...\nBackup track: V${backupVideoTrackNumber}`)
-        : (isRebackup ? "Queueing re-backup jobs...\nUsing existing backup track." : `Queueing backup jobs...\nBackup track: V${backupVideoTrackNumber}`));
+        ? (isRebackup ? "Rendering re-backup files in Premiere Pro...\nUsing original audio and the recorded backup layout; track selectors are ignored." : `Rendering backup files in Premiere Pro...\nBackup track: V${backupVideoTrackNumber}`)
+        : (isRebackup ? "Queueing re-backup jobs...\nUsing original audio and the recorded backup layout; track selectors are ignored." : `Queueing backup jobs...\nBackup track: V${backupVideoTrackNumber}`));
 
     const selectedItemsJson = JSON.stringify(selectedQueueItems);
     const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}","${escapeForEvalScript(selectedAudioFormat)}",${backupVideoTrackNumber},${removeSequenceMarkers ? "true" : "false"},"${escapeForEvalScript(selectedItemsJson)}","${escapeForEvalScript(selectedExportMode)}",${isRebackup ? "true" : "false"})`;

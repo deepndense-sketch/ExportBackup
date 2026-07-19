@@ -23,9 +23,11 @@ const DEFAULT_BACKUP_VIDEO_TRACK = 5;
 const EXPORT_MODE_PREMIERE = "premiere";
 const EXPORT_MODE_MEDIA_ENCODER = "mediaEncoder";
 const EXPORT_MANIFEST_SUFFIX = "_ExportBackupMap.json";
+const REBACKUP_TEMP_MARKER = "_REBKP_TEMP";
 const EXPORT_MONITOR_INTERVAL_MS = 5000;
 const EXPORT_MONITOR_STABLE_PASSES = 2;
 const EXPORT_MONITOR_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+const REBACKUP_RECOVERY_STABLE_WAIT_MS = 2000;
 
 let exportFolder = null;
 let alignFolder = null;
@@ -1405,6 +1407,156 @@ async function finalizeRebackupFiles(manifest) {
     return manifest;
 }
 
+function getRebackupFinalPath(tempPath) {
+    if (!tempPath) {
+        return "";
+    }
+
+    const parsedPath = path.parse(tempPath);
+    if (!parsedPath.name.toUpperCase().endsWith(REBACKUP_TEMP_MARKER)) {
+        return "";
+    }
+
+    const finalName = parsedPath.name.substring(0, parsedPath.name.length - REBACKUP_TEMP_MARKER.length);
+    return path.join(parsedPath.dir, `${finalName}${parsedPath.ext}`);
+}
+
+function getPathComparisonKey(filePath) {
+    try {
+        return path.resolve(filePath || "").toLowerCase();
+    } catch (error) {
+        return String(filePath || "").toLowerCase();
+    }
+}
+
+function buildRebackupRecoveryEntry(tempPath, baseName) {
+    const fileName = path.basename(tempPath || "");
+    const lowerFileName = fileName.toLowerCase();
+    const lowerBaseName = String(baseName || "").toLowerCase();
+    const finalPath = getRebackupFinalPath(tempPath);
+
+    if (!finalPath || !lowerFileName.startsWith(`${lowerBaseName}_`)) {
+        return null;
+    }
+
+    if (lowerFileName.startsWith(`${lowerBaseName}_backup${REBACKUP_TEMP_MARKER.toLowerCase()}.`)) {
+        return {
+            kind: "video",
+            path: tempPath,
+            finalPath,
+            trackNumber: 0,
+            trackNumbers: [],
+            name: fileName
+        };
+    }
+
+    const trackNumbers = parseTrackNumbersFromFileName(fileName, baseName);
+    if (!trackNumbers.length) {
+        return null;
+    }
+
+    return {
+        kind: "audio",
+        path: tempPath,
+        finalPath,
+        trackNumber: trackNumbers[0],
+        trackNumbers,
+        name: fileName
+    };
+}
+
+function collectRebackupRecoveryEntries(folderPath, sequenceName, manifest) {
+    const baseName = sanitizeSequenceName((manifest && manifest.baseName) || sequenceName);
+    const entries = [];
+    const entryIndexesByFinalPath = {};
+
+    const addEntry = (entry, preferTemp) => {
+        if (!entry || !entry.path) {
+            return;
+        }
+
+        const derivedFinalPath = entry.finalPath || getRebackupFinalPath(entry.path) || entry.path;
+        const tempExists = fileExists(entry.path) && !!getRebackupFinalPath(entry.path);
+        const finalExists = fileExists(derivedFinalPath);
+        if (!tempExists && !finalExists) {
+            return;
+        }
+
+        const normalizedEntry = Object.assign({}, entry, {
+            finalPath: derivedFinalPath,
+            path: tempExists ? entry.path : derivedFinalPath,
+            name: path.basename(tempExists ? entry.path : derivedFinalPath)
+        });
+        const finalPathKey = getPathComparisonKey(derivedFinalPath);
+
+        if (Object.prototype.hasOwnProperty.call(entryIndexesByFinalPath, finalPathKey)) {
+            const existingIndex = entryIndexesByFinalPath[finalPathKey];
+            if (preferTemp && tempExists) {
+                entries[existingIndex] = normalizedEntry;
+            }
+            return;
+        }
+
+        entryIndexesByFinalPath[finalPathKey] = entries.length;
+        entries.push(normalizedEntry);
+    };
+
+    if (manifest && Array.isArray(manifest.expectedFiles)) {
+        manifest.expectedFiles.forEach((entry) => addEntry(entry, false));
+    }
+
+    fs.readdirSync(folderPath, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.toUpperCase().includes(REBACKUP_TEMP_MARKER))
+        .forEach((entry) => {
+            const tempPath = path.join(folderPath, entry.name);
+            addEntry(buildRebackupRecoveryEntry(tempPath, baseName), true);
+        });
+
+    return {
+        baseName,
+        entries,
+        hasTempFiles: entries.some((entry) => fileExists(entry.path) && !!getRebackupFinalPath(entry.path))
+    };
+}
+
+async function ensureRebackupTempFilesAreStable(entries) {
+    const tempPaths = (entries || [])
+        .map((entry) => entry && entry.path)
+        .filter((entryPath) => fileExists(entryPath) && !!getRebackupFinalPath(entryPath));
+    let previousSizes = {};
+
+    tempPaths.forEach((tempPath) => {
+        previousSizes[tempPath] = fs.statSync(tempPath).size;
+    });
+
+    for (let pass = 0; pass < 2; pass += 1) {
+        await delay(REBACKUP_RECOVERY_STABLE_WAIT_MS);
+
+        const nextSizes = {};
+        let allStable = true;
+        tempPaths.forEach((tempPath) => {
+            if (!fileExists(tempPath)) {
+                allStable = false;
+                return;
+            }
+
+            const nextSize = fs.statSync(tempPath).size;
+            nextSizes[tempPath] = nextSize;
+            if (nextSize < 1 || nextSize !== previousSizes[tempPath]) {
+                allStable = false;
+            }
+        });
+
+        if (!allStable) {
+            throw new Error(
+                "A _REBKP_TEMP file is still being written. Wait for the export to finish, then run Align Existing again."
+            );
+        }
+
+        previousSizes = nextSizes;
+    }
+}
+
 async function prepareRebackupReplacement(manifest) {
     if (!manifest || !Array.isArray(manifest.expectedFiles) || !manifest.expectedFiles.length) {
         return;
@@ -1418,8 +1570,58 @@ async function prepareRebackupReplacement(manifest) {
     const result = await callHost(`exportBackup.prepareRebackupReplacement("${escapeForEvalScript(expectedFilesJson)}")`);
     const parsed = parseHostResult(result);
     if (!parsed || parsed.ok === false) {
-        throw new Error((parsed && parsed.message) || "Could not prepare old backup media for replacement.");
+        const remainingPaths = parsed && Array.isArray(parsed.remainingOnlinePaths)
+            ? `\nStill online:\n${parsed.remainingOnlinePaths.join("\n")}`
+            : "";
+        throw new Error(`${(parsed && parsed.message) || "Could not prepare old backup media for replacement."}${remainingPaths}`);
     }
+
+    return parsed;
+}
+
+async function recoverRebackupTempFiles(folderPath, sequenceName, manifest) {
+    const recoveryInfo = collectRebackupRecoveryEntries(folderPath, sequenceName, manifest);
+    if (!recoveryInfo.hasTempFiles) {
+        return {
+            recovered: false,
+            manifest: manifest || null
+        };
+    }
+
+    await ensureRebackupTempFilesAreStable(recoveryInfo.entries);
+
+    const recoveryManifest = Object.assign({
+        version: 4,
+        createdAt: new Date().toISOString(),
+        folderPath,
+        sequenceName,
+        baseName: recoveryInfo.baseName,
+        backupVideoTrackNumber: getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK),
+        audioFormat: getSelectedAudioFormat(),
+        exportMode: getSelectedExportMode(),
+        rebackup: true,
+        rebackupLayout: null,
+        projectName: "",
+        projectPath: ""
+    }, manifest || {});
+
+    recoveryManifest.version = Math.max(4, parseInt(recoveryManifest.version, 10) || 0);
+    recoveryManifest.folderPath = folderPath;
+    recoveryManifest.sequenceName = recoveryManifest.sequenceName || sequenceName;
+    recoveryManifest.baseName = recoveryManifest.baseName || recoveryInfo.baseName;
+    recoveryManifest.rebackup = true;
+    recoveryManifest.rebackupRecovery = true;
+    recoveryManifest.expectedFiles = recoveryInfo.entries;
+    recoveryManifest.manifestPath = writeExportManifest(recoveryManifest);
+
+    await prepareRebackupReplacement(recoveryManifest);
+    await finalizeRebackupFiles(recoveryManifest);
+    recoveryManifest.manifestPath = writeExportManifest(recoveryManifest);
+
+    return {
+        recovered: true,
+        manifest: recoveryManifest
+    };
 }
 
 function updateAlignFolder(folderPath) {
@@ -1438,7 +1640,7 @@ function updateAlignFolder(folderPath) {
 
 function createExportManifestFromHostResult(parsed) {
     return {
-        version: 3,
+        version: 4,
         createdAt: new Date().toISOString(),
         folderPath: exportFolder,
         sequenceName: parsed.sequenceName || "",
@@ -1528,7 +1730,12 @@ async function runAlignmentFlow(folderPath, options) {
             return false;
         }
 
-        const manifest = settings.manifest || readManifestForSequence(folderPath, activeSequenceName);
+        let manifest = settings.manifest || readManifestForSequence(folderPath, activeSequenceName);
+        const recoveryResult = await recoverRebackupTempFiles(folderPath, activeSequenceName, manifest);
+        if (recoveryResult.recovered) {
+            manifest = recoveryResult.manifest;
+            setStatus("Recovered _REBKP_TEMP files. Importing and restoring the backup media...");
+        }
         const matchInfo = scanExportFolderForSequence(folderPath, activeSequenceName, manifest);
 
         if (matchInfo.manifest && matchInfo.manifest.backupVideoTrackNumber) {
@@ -1669,8 +1876,11 @@ async function monitorExportCompletion() {
                 await finalizeRebackupFiles(state.manifest);
                 writeExportManifest(state.manifest);
             } catch (error) {
-                setStatus(`Re-backup finished exporting, but replacing old files failed.\n${error.message}`);
-                showBlockingMessage("Re-backup file replacement failed.");
+                setStatus(
+                    "Re-backup finished exporting, but replacing old files failed.\n" +
+                    `${error.message}\nUse Align Existing to retry cleanup, rename the _REBKP_TEMP files, and align them.`
+                );
+                showBlockingMessage("Re-backup replacement failed. Use Align Existing to recover the TEMP files.");
                 return;
             }
         }
@@ -1856,11 +2066,12 @@ async function runExport(isRebackup) {
 
     try {
         const manifest = createExportManifestFromHostResult(parsed);
+        manifest.manifestPath = writeExportManifest(manifest);
         if (manifest.rebackup && parsed.exportMode === EXPORT_MODE_PREMIERE) {
             await prepareRebackupReplacement(manifest);
             await finalizeRebackupFiles(manifest);
+            manifest.manifestPath = writeExportManifest(manifest);
         }
-        manifest.manifestPath = writeExportManifest(manifest);
         updateAlignFolder(exportFolder);
         applyBackupDefaults({ videoTrackNumber: manifest.backupVideoTrackNumber }, false);
         if (parsed.exportMode === EXPORT_MODE_PREMIERE) {
@@ -1877,7 +2088,12 @@ async function runExport(isRebackup) {
         }
     } catch (error) {
         setBusyState(false);
-        const message = `Queue created, but the export map could not be written.\n${error.message}`;
+        const message = isRebackup
+            ? (
+                "Re-backup rendered the _REBKP_TEMP files, but could not replace the old files.\n" +
+                `${error.message}\nUse Align Existing to retry cleanup, rename the TEMP files, and align them.`
+            )
+            : `Queue created, but the export map could not be written.\n${error.message}`;
         setStatus(message);
         showBlockingMessage(message);
     }

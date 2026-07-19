@@ -1,5 +1,5 @@
 {
-  "version": "2.2",
+  "version": "2.2.1",
   "channel": "main",
-  "notes": "Release 2.2 makes re-backup use only original-track audio, keeps backup-video audio muted, ignores queue selectors in re-backup mode, and restores replacement clips to their recorded tracks and timeline positions."
+  "notes": "Release 2.2.1 fully releases old backup media before file replacement and lets Align Existing recover completed _REBKP_TEMP files by cleaning Premiere references, restoring final names, and aligning them."
 }

@@ -96,6 +96,7 @@ var JSON = EB_GLOBAL.JSON;
 var exportBackup = exportBackup || {};
 var EB_ENCODER_LAUNCH_WAIT_MS = 20000;
 var EB_ENCODER_QUEUE_SETTLE_WAIT_MS = 10000;
+var EB_MEDIA_RELEASE_WAIT_MS = 2500;
 
 function ebEscape(value) {
     if (value === null || value === undefined) {
@@ -1099,11 +1100,19 @@ function ebCheckPreset(path, label) {
     }
 }
 
-function ebFindProjectItemByMediaPath(rootItem, mediaPath) {
+function ebNormalizeMediaPathForComparison(mediaPath) {
+    return String(ebToFsPath(mediaPath) || "")
+        .split("/").join("\\")
+        .toLowerCase();
+}
+
+function ebCollectProjectItemsByMediaPath(rootItem, mediaPath, result) {
+    var matches = result || [];
+    var normalizedMediaPath = ebNormalizeMediaPathForComparison(mediaPath);
     var i;
 
-    if (!rootItem || !rootItem.children) {
-        return null;
+    if (!rootItem || !rootItem.children || !normalizedMediaPath) {
+        return matches;
     }
 
     for (i = 0; i < rootItem.children.numItems; i++) {
@@ -1113,20 +1122,25 @@ function ebFindProjectItemByMediaPath(rootItem, mediaPath) {
         }
 
         if (child.type === ProjectItemType.BIN) {
-            var nested = ebFindProjectItemByMediaPath(child, mediaPath);
-            if (nested) {
-                return nested;
-            }
+            ebCollectProjectItemsByMediaPath(child, mediaPath, matches);
         } else {
             try {
-                if (child.getMediaPath && child.getMediaPath() === mediaPath) {
-                    return child;
+                if (
+                    child.getMediaPath &&
+                    ebNormalizeMediaPathForComparison(child.getMediaPath()) === normalizedMediaPath
+                ) {
+                    matches.push(child);
                 }
             } catch (e) {}
         }
     }
 
-    return null;
+    return matches;
+}
+
+function ebFindProjectItemByMediaPath(rootItem, mediaPath) {
+    var matches = ebCollectProjectItemsByMediaPath(rootItem, mediaPath, []);
+    return matches.length ? matches[0] : null;
 }
 
 function ebFindChildBinByName(parentItem, name) {
@@ -1175,26 +1189,103 @@ function ebImportProjectItem(mediaPath, targetBin) {
     return ebFindProjectItemByMediaPath(targetBin || app.project.rootItem, fsPath) || ebFindProjectItemByMediaPath(app.project.rootItem, fsPath);
 }
 
-function ebRemoveProjectItemByMediaPath(mediaPath) {
-    var item = ebFindProjectItemByMediaPath(app.project.rootItem, ebToFsPath(mediaPath));
+function ebIsProjectItemOffline(item) {
+    try {
+        if (item && item.isOffline) {
+            return !!item.isOffline();
+        }
+    } catch (e) {}
+
+    return false;
+}
+
+function ebSetProjectItemOffline(item) {
+    if (!item || !item.setOffline) {
+        return false;
+    }
+
+    try {
+        var result = item.setOffline();
+        if (result === true || result === 0 || ebIsProjectItemOffline(item)) {
+            return true;
+        }
+    } catch (e) {}
+
+    return false;
+}
+
+function ebDeleteProjectItem(item) {
     if (!item) {
         return false;
     }
 
     try {
         if (item.deleteBin) {
-            return item.deleteBin();
+            var deleteResult = item.deleteBin();
+            if (deleteResult === 0 || deleteResult === true || deleteResult === undefined) {
+                return true;
+            }
         }
     } catch (e) {}
 
     try {
         if (item.remove) {
-            item.remove();
-            return true;
+            var removeResult = item.remove();
+            return removeResult !== false;
         }
     } catch (e2) {}
 
     return false;
+}
+
+function ebReleaseProjectItemsByMediaPath(mediaPath) {
+    var fsPath = ebToFsPath(mediaPath);
+    var items = ebCollectProjectItemsByMediaPath(app.project.rootItem, fsPath, []);
+    var result = {
+        path: fsPath,
+        found: items.length,
+        offlined: 0,
+        removed: 0,
+        remaining: 0,
+        remainingOnline: 0
+    };
+    var i;
+
+    for (i = 0; i < items.length; i++) {
+        if (ebSetProjectItemOffline(items[i])) {
+            result.offlined += 1;
+        }
+    }
+
+    for (i = items.length - 1; i >= 0; i--) {
+        if (ebDeleteProjectItem(items[i])) {
+            result.removed += 1;
+        }
+    }
+
+    var remainingItems = ebCollectProjectItemsByMediaPath(app.project.rootItem, fsPath, []);
+    result.remaining = remainingItems.length;
+    for (i = 0; i < remainingItems.length; i++) {
+        if (!ebIsProjectItemOffline(remainingItems[i])) {
+            result.remainingOnline += 1;
+        }
+    }
+
+    return result;
+}
+
+function ebGetOnlineProjectItemCountByMediaPath(mediaPath) {
+    var items = ebCollectProjectItemsByMediaPath(app.project.rootItem, ebToFsPath(mediaPath), []);
+    var onlineCount = 0;
+    var i;
+
+    for (i = 0; i < items.length; i++) {
+        if (!ebIsProjectItemOffline(items[i])) {
+            onlineCount += 1;
+        }
+    }
+
+    return onlineCount;
 }
 
 function ebRemoveUnusedMedia() {
@@ -2197,8 +2288,20 @@ exportBackup.prepareRebackupReplacement = function (expectedFilesJson) {
         var expectedFiles = expectedFilesJson ? JSON.parse(expectedFilesJson) : [];
         var sequenceBaseName = ebGetSequenceExportBaseName(sequence);
         var backupVideoTrackNumber = ebFindManagedBackupVideoTrackNumber(sequence, sequenceBaseName);
+        var releasePaths = [];
+        var releaseResults = [];
+        var seenReleasePaths = {};
+        var offlinedItems = 0;
         var removedItems = 0;
+        var sourceMonitorClosed = false;
+        var remainingOnlinePaths = [];
         var i;
+
+        try {
+            if (app.sourceMonitor && app.sourceMonitor.closeAllClips) {
+                sourceMonitorClosed = app.sourceMonitor.closeAllClips() === 0;
+            }
+        } catch (sourceMonitorError) {}
 
         if (backupVideoTrackNumber > 0 && sequence.videoTracks[backupVideoTrackNumber - 1]) {
             ebRemoveManagedClipsFromTrack(sequence.videoTracks[backupVideoTrackNumber - 1], sequenceBaseName, "backup", 0);
@@ -2212,9 +2315,21 @@ exportBackup.prepareRebackupReplacement = function (expectedFilesJson) {
                 continue;
             }
 
-            if (entry.finalPath && ebRemoveProjectItemByMediaPath(entry.finalPath)) {
-                removedItems += 1;
+            if (entry.finalPath) {
+                var releasePath = ebToFsPath(entry.finalPath);
+                var releasePathKey = ebNormalizeMediaPathForComparison(releasePath);
+                if (releasePathKey && !seenReleasePaths[releasePathKey]) {
+                    seenReleasePaths[releasePathKey] = true;
+                    releasePaths.push(releasePath);
+                }
             }
+        }
+
+        for (i = 0; i < releasePaths.length; i++) {
+            var releaseResult = ebReleaseProjectItemsByMediaPath(releasePaths[i]);
+            releaseResults.push(releaseResult);
+            offlinedItems += releaseResult.offlined;
+            removedItems += releaseResult.removed;
         }
 
         try {
@@ -2224,8 +2339,29 @@ exportBackup.prepareRebackupReplacement = function (expectedFilesJson) {
             }
         } catch (saveError) {}
 
-        return ebResult(true, "Prepared re-backup replacement.", {
-            removedProjectItems: removedItems
+        $.sleep(EB_MEDIA_RELEASE_WAIT_MS);
+
+        for (i = 0; i < releasePaths.length; i++) {
+            if (ebGetOnlineProjectItemCountByMediaPath(releasePaths[i]) > 0) {
+                remainingOnlinePaths.push(releasePaths[i]);
+            }
+        }
+
+        if (remainingOnlinePaths.length) {
+            return ebResult(false, "Premiere Pro still has old backup media online, so local files were not replaced.", {
+                sourceMonitorClosed: sourceMonitorClosed,
+                offlinedProjectItems: offlinedItems,
+                removedProjectItems: removedItems,
+                remainingOnlinePaths: remainingOnlinePaths,
+                releaseResults: releaseResults
+            });
+        }
+
+        return ebResult(true, "Released old backup media for replacement.", {
+            sourceMonitorClosed: sourceMonitorClosed,
+            offlinedProjectItems: offlinedItems,
+            removedProjectItems: removedItems,
+            releaseResults: releaseResults
         });
     } catch (e) {
         return ebResult(false, e.toString());

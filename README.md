@@ -39,6 +39,8 @@ Re-backup exports new backup files, replaces the old backup files, keeps the cor
 
 For re-backup, the queue checkboxes and merge selections are ignored. ExportBackup records the existing backup clips before export, uses the `_BACKUP` clip only as a video layer, keeps its attached audio muted, and exports audio only from the original source tracks. After replacement, the backup video, muted video audio, and separate audio files return to their recorded tracks and timeline start positions.
 
+If Premiere Pro keeps an old backup file locked, the completed `_REBKP_TEMP` renders are left untouched. Run `Align Existing` on the export folder: it verifies that the TEMP files are finished, releases and removes every old backup reference from Premiere, renames the TEMP files to their correct names, and completes alignment.
+
 ## Align Existing
 
 Use `Align Existing` when the files were already exported and you only want to import and align them.

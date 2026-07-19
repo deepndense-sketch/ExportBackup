@@ -266,10 +266,15 @@ input[type="radio"]:checked::after {
     transform: rotate(-45deg) scale(1);
 }
 
-button.update-ready {
-    background: linear-gradient(135deg, #56a7ff, #2d73ff);
-    color: #f7fbff;
-    border: 1px solid rgba(140, 188, 255, 0.45);
+#updateButton.update-ready {
+    background: linear-gradient(135deg, #3f9cff, #1268ee);
+    color: #ffffff;
+    border: 1px solid rgba(153, 205, 255, 0.72);
+    box-shadow: 0 0 0 1px rgba(38, 130, 255, 0.2), 0 6px 18px rgba(18, 104, 238, 0.34);
+}
+
+#updateButton.update-ready:hover {
+    background: linear-gradient(135deg, #59aaff, #287aff);
 }
 
 button:disabled {

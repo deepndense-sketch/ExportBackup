@@ -660,7 +660,7 @@ async function checkForUpdates() {
         if (compareVersions(remoteVersion, localVersion) > 0) {
             setUpdateButton(`Update to ${remoteVersion}`, true, remoteVersionNotes);
         } else {
-            setUpdateButton(`Version ${localVersion}`, false, localVersionNotes);
+            setUpdateButton(`Latest Version ${localVersion}`, false, localVersionNotes);
         }
     } catch (error) {
         remoteVersionNotes = "";

@@ -71,6 +71,6 @@ Click `Show Presets` only if you need to change the preset files.
 
 ## Updates
 
-The version button shows the installed version.
+The version button shows `Latest Version` when the installed release is current.
 
-When a new update is available, the button changes color. Click it to update from GitHub.
+When a new update is available, the version button turns blue. Click it to update from GitHub.

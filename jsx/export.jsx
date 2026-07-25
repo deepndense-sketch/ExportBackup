@@ -2184,11 +2184,14 @@ exportBackup.getExportSelectionInfo = function () {
 
             var currentTrackName = ebGetTrackName(sequence.audioTracks[i]);
             var isManagedTrack = !!managedSelection.trackNumbers[i + 1] || !!managedSelection.backupTrackNumbers[i + 1];
+            if (isManagedTrack) {
+                continue;
+            }
 
             items.push({
                 kind: "audio",
                 label: "Track " + (i + 1),
-                selected: !isManagedTrack,
+                selected: true,
                 locked: false,
                 trackNumber: i + 1,
                 trackName: currentTrackName

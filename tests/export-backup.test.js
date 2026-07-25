@@ -97,12 +97,48 @@ test('Queue Backup Exports has a visual-only toggle and always starts shown', ()
     assert.match(html, /id="toggleQueueBackupSectionButton"[^>]*>Hide</);
     assert.match(html, /id="queueBackupSectionContent" class="stack"/);
     assert.doesNotMatch(html, /id="queueBackupSectionContent"[^>]*is-hidden/);
+    assert.match(
+        html,
+        /id="audioFormatWav"[\s\S]*?<\/div>\s*<\/div>\s*<div class="stack">\s*<div class="section-label">Queue Preview<\/div>/
+    );
     assert.match(mainSource, /function toggleQueueBackupSection\(\)/);
     assert.match(
         mainSource,
         /document\.addEventListener\("DOMContentLoaded",[\s\S]*setQueueBackupSectionVisibility\(true\)/
     );
     assert.doesNotMatch(mainSource, /queueBackupSectionVisibleStorage/i);
+});
+
+test('Queue Preview omits app-managed backup audio layers', () => {
+    const sourceTrack = makeTrack(0, [{ projectItem: { name: 'Dialogue.wav' } }]);
+    const backupTrack = makeTrack(0, [{ projectItem: { name: 'Scene_BACKUP.mp4' } }]);
+    const managedAudioTrack = makeTrack(1, [{ projectItem: { name: 'Scene_Track1.mp3' } }]);
+    const sequence = {
+        name: 'Scene',
+        audioTracks: makeCollection(
+            [sourceTrack, backupTrack, managedAudioTrack],
+            'numTracks'
+        ),
+        videoTracks: makeCollection([], 'numTracks')
+    };
+    const { context } = loadHostLogic({
+        project: {
+            activeSequence: sequence,
+            rootItem: {
+                type: 2,
+                children: makeCollection([], 'numItems')
+            },
+            sequences: makeCollection([sequence], 'numSequences'),
+            save() {}
+        }
+    });
+
+    const result = JSON.parse(context.exportBackup.getExportSelectionInfo());
+    assert.equal(result.ok, true);
+    assert.deepEqual(
+        Array.from(result.items, (item) => item.label),
+        ['Backup MP4', 'Track 1']
+    );
 });
 
 test('video visibility is restored exactly after export-only hiding', () => {

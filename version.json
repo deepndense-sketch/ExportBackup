@@ -1,5 +1,5 @@
 {
-  "version": "3.0.0",
+  "version": "3.1.0",
   "channel": "main",
-  "notes": "Release 3.0.0 adds a default-open visual Hide/Show control for Queue Backup Exports and includes the robust re-backup cleanup, exact video-state restoration, exclusive backup audio, and single final project save."
+  "notes": "Release 3.1.0 limits Hide/Show to the settings above Queue Preview, keeps Queue Preview and its actions visible, and omits app-managed backup audio layers from the selectable track list."
 }

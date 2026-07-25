@@ -560,39 +560,39 @@ button:disabled {
                     </label>
                 </div>
             </div>
+        </div>
 
-            <div class="stack">
-                <div class="section-label">Queue Preview</div>
-                <div class="row nowrap">
-                    <button id="exportButton" onclick="runExport(false)">Backup</button>
-                    <button id="rebackupButton" class="secondary" onclick="runExport(true)">Re-backup</button>
-                    <button id="alignFolderButton" class="secondary" onclick="alignExistingFolder()">Align Existing</button>
-                </div>
-                <div class="track-warning">IF HAVE SOLO TRACK: UNCHECK TO EXPORT</div>
-                <div id="exportSelectionList" class="selection-list">
-                    <div class="small-note">Refresh to load tracks.</div>
-                </div>
+        <div class="stack">
+            <div class="section-label">Queue Preview</div>
+            <div class="row nowrap">
+                <button id="exportButton" onclick="runExport(false)">Backup</button>
+                <button id="rebackupButton" class="secondary" onclick="runExport(true)">Re-backup</button>
+                <button id="alignFolderButton" class="secondary" onclick="alignExistingFolder()">Align Existing</button>
             </div>
+            <div class="track-warning">IF HAVE SOLO TRACK: UNCHECK TO EXPORT</div>
+            <div id="exportSelectionList" class="selection-list">
+                <div class="small-note">Refresh to load tracks.</div>
+            </div>
+        </div>
 
-            <div class="action-line">
-                <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Folder</button>
-                <div class="path-box action-value value-text" id="exportPath">No folder selected yet.</div>
-            </div>
+        <div class="action-line">
+            <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Folder</button>
+            <div class="path-box action-value value-text" id="exportPath">No folder selected yet.</div>
+        </div>
 
-            <div class="inline-options">
-                <label class="option">
-                    <input type="checkbox" id="removeSequenceMarkersCheckbox" checked>
-                    <span>Remove sequence markers</span>
-                </label>
-                <label class="option">
-                    <input type="checkbox" id="copyProjectFileCheckbox">
-                    <span>Copy project file</span>
-                </label>
-                <label class="option">
-                    <input type="checkbox" id="alignSortProjectFilesCheckbox">
-                    <span>Sort project files</span>
-                </label>
-            </div>
+        <div class="inline-options">
+            <label class="option">
+                <input type="checkbox" id="removeSequenceMarkersCheckbox" checked>
+                <span>Remove sequence markers</span>
+            </label>
+            <label class="option">
+                <input type="checkbox" id="copyProjectFileCheckbox">
+                <span>Copy project file</span>
+            </label>
+            <label class="option">
+                <input type="checkbox" id="alignSortProjectFilesCheckbox">
+                <span>Sort project files</span>
+            </label>
         </div>
 
     </section>

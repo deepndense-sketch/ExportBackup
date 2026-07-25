@@ -2,6 +2,8 @@
 
 ExportBackup helps you make a backup MP4 and separate audio exports from the active Premiere Pro sequence, then brings them back into the project and lines them up.
 
+The `Queue Backup Exports` section has a visual `Hide`/`Show` control and always opens shown when the panel loads.
+
 ## Install
 
 Run `deploy_extension.bat`.
@@ -37,9 +39,9 @@ Use `Re-backup` when the backup files are already in the project.
 
 Re-backup exports new backup files, replaces the old backup files, keeps the correct names, and aligns the new backup media back into the sequence.
 
-For re-backup, the queue checkboxes and merge selections are ignored. ExportBackup records the existing backup clips before export, uses the `_BACKUP` clip only as a video layer, keeps its attached audio muted, and exports audio only from the original source tracks. After replacement, the backup video, muted video audio, and separate audio files return to their recorded tracks and timeline start positions.
+For re-backup, the queue checkboxes and merge selections are ignored. ExportBackup records the existing backup clips before export, exports audio from the original source tracks, and restores every video track to its exact pre-export visibility state. After replacement, the backup video, its audio, and separate audio files return to their recorded tracks and timeline start positions. The backup MP4 audio is left as the only audible audio track.
 
-If Premiere Pro keeps an old backup file locked, the completed `_REBKP_TEMP` renders are left untouched. Run `Align Existing` on the export folder: it verifies that the TEMP files are finished, releases and removes every old backup reference from Premiere, renames the TEMP files to their correct names, and completes alignment.
+Before any `_REBKP_TEMP` file is renamed, ExportBackup removes old final-file clips and automatically imported TEMP-file clips from every sequence. Because Premiere exposes deletion for bins rather than ordinary footage items, the targeted backup items are moved into a temporary cleanup bin and that bin is deleted. ExportBackup then verifies by project-item identity that no online or offline target remains anywhere in the project. If Premiere Pro keeps an item or file locked, the completed TEMP renders are left untouched. Run `Align Existing` on the export folder to retry the verified cleanup, rename, import, and alignment transaction.
 
 ## Align Existing
 

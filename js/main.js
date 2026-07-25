@@ -41,6 +41,7 @@ let localVersionNotes = "";
 let remoteVersion = null;
 let remoteVersionNotes = "";
 let presetSectionVisible = true;
+let queueBackupSectionVisible = true;
 let exportMonitorState = null;
 let exportSelectionState = null;
 let mergedAudioGroups = [];
@@ -105,6 +106,24 @@ function setPresetSectionVisibility(visible) {
 
 function togglePresetSection() {
     setPresetSectionVisibility(!presetSectionVisible);
+}
+
+function setQueueBackupSectionVisibility(visible) {
+    queueBackupSectionVisible = visible;
+
+    const content = document.getElementById("queueBackupSectionContent");
+    const toggleButton = document.getElementById("toggleQueueBackupSectionButton");
+    if (!content || !toggleButton) {
+        return;
+    }
+
+    content.classList.toggle("is-hidden", !visible);
+    toggleButton.textContent = visible ? "Hide" : "Show";
+    toggleButton.setAttribute("aria-expanded", visible ? "true" : "false");
+}
+
+function toggleQueueBackupSection() {
+    setQueueBackupSectionVisibility(!queueBackupSectionVisible);
 }
 
 function getAudioFormatInputs() {
@@ -1392,6 +1411,10 @@ function replaceRebackupFile(entry) {
 async function finalizeRebackupFiles(manifest) {
     const expectedFiles = manifest && Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
 
+    if (!manifest || manifest.rebackupReplacementPrepared !== true) {
+        throw new Error("Re-backup cleanup was not verified, so TEMP files were not renamed.");
+    }
+
     for (let i = 0; i < expectedFiles.length; i += 1) {
         const entry = expectedFiles[i];
         if (!entry || !entry.path || !entry.finalPath || entry.path === entry.finalPath) {
@@ -1570,12 +1593,21 @@ async function prepareRebackupReplacement(manifest) {
     const result = await callHost(`exportBackup.prepareRebackupReplacement("${escapeForEvalScript(expectedFilesJson)}")`);
     const parsed = parseHostResult(result);
     if (!parsed || parsed.ok === false) {
-        const remainingPaths = parsed && Array.isArray(parsed.remainingOnlinePaths)
-            ? `\nStill online:\n${parsed.remainingOnlinePaths.join("\n")}`
+        const remainingProjectPaths = parsed && Array.isArray(parsed.remainingProjectPaths)
+            ? parsed.remainingProjectPaths
+            : (parsed && Array.isArray(parsed.remainingOnlinePaths) ? parsed.remainingOnlinePaths : []);
+        const remainingPaths = remainingProjectPaths.length
+            ? `\nStill present in the Premiere project:\n${remainingProjectPaths.join("\n")}`
             : "";
         throw new Error(`${(parsed && parsed.message) || "Could not prepare old backup media for replacement."}${remainingPaths}`);
     }
 
+    manifest.rebackupReplacementPrepared = true;
+    manifest.rebackupCleanup = {
+        removedTimelineClips: parseInt(parsed.removedTimelineClips, 10) || 0,
+        removedProjectItems: parseInt(parsed.removedProjectItems, 10) || 0,
+        offlinedProjectItems: parseInt(parsed.offlinedProjectItems, 10) || 0
+    };
     return parsed;
 }
 
@@ -2120,6 +2152,7 @@ document.addEventListener("DOMContentLoaded", () => {
     bindExportOptions();
     markBackupInputsDirty();
     loadSavedBackupSettings();
+    setQueueBackupSectionVisibility(true);
     setPresetSectionVisibility(presetSectionVisible);
     setUpdateButton(`Version ${localVersion}`, false, localVersionNotes);
     checkForUpdates();

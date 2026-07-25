@@ -416,6 +416,17 @@ button:disabled {
     font-size: 12px;
 }
 
+.queue-section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+#toggleQueueBackupSectionButton {
+    flex: 0 0 auto;
+}
+
 .selection-list {
     display: grid;
     gap: 8px;
@@ -492,91 +503,96 @@ button:disabled {
                 <div class="section-label">Backup</div>
                 <button id="updateButton" class="secondary" onclick="runGithubUpdate()">Version ...</button>
             </div>
-            <h2>Queue Backup Exports</h2>
+            <div class="queue-section-heading">
+                <h2>Queue Backup Exports</h2>
+                <button id="toggleQueueBackupSectionButton" class="text-toggle" onclick="toggleQueueBackupSection()">Hide</button>
+            </div>
         </div>
 
-        <div class="track-row">
-            <label for="exportVideoTrackInput">BACKUP TRACK</label>
-            <input id="exportVideoTrackInput" type="number" min="1" value="5">
-            <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh</button>
-            <button id="togglePresetSectionButton" class="text-toggle" onclick="togglePresetSection()">Show Presets</button>
-        </div>
+        <div id="queueBackupSectionContent" class="stack">
+            <div class="track-row">
+                <label for="exportVideoTrackInput">BACKUP TRACK</label>
+                <input id="exportVideoTrackInput" type="number" min="1" value="5">
+                <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh</button>
+                <button id="togglePresetSectionButton" class="text-toggle" onclick="togglePresetSection()">Show Presets</button>
+            </div>
 
-        <div id="presetSection" class="stack">
+            <div id="presetSection" class="stack">
+                <div class="action-line">
+                    <button id="chooseVideoPresetButton" class="preset-button" onclick="chooseVideoPreset()">Video Preset</button>
+                    <div class="path-box action-value value-text" id="videoPresetPath"></div>
+                </div>
+
+                <div class="action-line">
+                    <button id="chooseMp3PresetButton" class="preset-button" onclick="chooseMp3Preset()">MP3 Preset</button>
+                    <div class="path-box action-value value-text" id="mp3PresetPath"></div>
+                </div>
+
+                <div class="action-line">
+                    <button id="chooseWavPresetButton" class="preset-button" onclick="chooseWavPreset()">WAV Preset</button>
+                    <div class="path-box action-value value-text" id="wavPresetPath"></div>
+                </div>
+            </div>
+
+            <div class="small-note">Turn off any <strong>soloed audio tracks</strong> before export. <strong>Re-backup</strong> ignores the queue checkboxes, uses original-track audio only, and restores backup clips to their recorded positions. <strong>Align Existing</strong> also recovers completed <code>_REBKP_TEMP</code> files when old media could not be replaced. Use <strong>Merge Selection</strong> after ticking audio tracks you want grouped together.</div>
+
+            <div class="settings-strip">
+                <div class="setting-group export">
+                    <span class="setting-label">Export With</span>
+                    <label class="option">
+                        <input type="checkbox" id="exportModePremiere" value="premiere">
+                        <span>Premiere</span>
+                    </label>
+                    <label class="option">
+                        <input type="checkbox" id="exportModeMediaEncoder" value="mediaEncoder" checked>
+                        <span>Media&nbsp;Encoder</span>
+                    </label>
+                </div>
+
+                <div class="setting-group audio">
+                    <label class="option">
+                        <input type="checkbox" id="audioFormatMp3" value="mp3" checked>
+                        <span>MP3</span>
+                    </label>
+                    <label class="option">
+                        <input type="checkbox" id="audioFormatWav" value="wav">
+                        <span>WAV</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="stack">
+                <div class="section-label">Queue Preview</div>
+                <div class="row nowrap">
+                    <button id="exportButton" onclick="runExport(false)">Backup</button>
+                    <button id="rebackupButton" class="secondary" onclick="runExport(true)">Re-backup</button>
+                    <button id="alignFolderButton" class="secondary" onclick="alignExistingFolder()">Align Existing</button>
+                </div>
+                <div class="track-warning">IF HAVE SOLO TRACK: UNCHECK TO EXPORT</div>
+                <div id="exportSelectionList" class="selection-list">
+                    <div class="small-note">Refresh to load tracks.</div>
+                </div>
+            </div>
+
             <div class="action-line">
-                <button id="chooseVideoPresetButton" class="preset-button" onclick="chooseVideoPreset()">Video Preset</button>
-                <div class="path-box action-value value-text" id="videoPresetPath"></div>
+                <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Folder</button>
+                <div class="path-box action-value value-text" id="exportPath">No folder selected yet.</div>
             </div>
 
-            <div class="action-line">
-                <button id="chooseMp3PresetButton" class="preset-button" onclick="chooseMp3Preset()">MP3 Preset</button>
-                <div class="path-box action-value value-text" id="mp3PresetPath"></div>
-            </div>
-
-            <div class="action-line">
-                <button id="chooseWavPresetButton" class="preset-button" onclick="chooseWavPreset()">WAV Preset</button>
-                <div class="path-box action-value value-text" id="wavPresetPath"></div>
-            </div>
-        </div>
-
-        <div class="small-note">Turn off any <strong>soloed audio tracks</strong> before export. <strong>Re-backup</strong> ignores the queue checkboxes, uses original-track audio only, and restores backup clips to their recorded positions. <strong>Align Existing</strong> also recovers completed <code>_REBKP_TEMP</code> files when old media could not be replaced. Use <strong>Merge Selection</strong> after ticking audio tracks you want grouped together.</div>
-
-        <div class="settings-strip">
-            <div class="setting-group export">
-                <span class="setting-label">Export With</span>
+            <div class="inline-options">
                 <label class="option">
-                    <input type="checkbox" id="exportModePremiere" value="premiere">
-                    <span>Premiere</span>
+                    <input type="checkbox" id="removeSequenceMarkersCheckbox" checked>
+                    <span>Remove sequence markers</span>
                 </label>
                 <label class="option">
-                    <input type="checkbox" id="exportModeMediaEncoder" value="mediaEncoder" checked>
-                    <span>Media&nbsp;Encoder</span>
-                </label>
-            </div>
-
-            <div class="setting-group audio">
-                <label class="option">
-                    <input type="checkbox" id="audioFormatMp3" value="mp3" checked>
-                    <span>MP3</span>
+                    <input type="checkbox" id="copyProjectFileCheckbox">
+                    <span>Copy project file</span>
                 </label>
                 <label class="option">
-                    <input type="checkbox" id="audioFormatWav" value="wav">
-                    <span>WAV</span>
+                    <input type="checkbox" id="alignSortProjectFilesCheckbox">
+                    <span>Sort project files</span>
                 </label>
             </div>
-        </div>
-
-        <div class="stack">
-            <div class="section-label">Queue Preview</div>
-            <div class="row nowrap">
-                <button id="exportButton" onclick="runExport(false)">Backup</button>
-                <button id="rebackupButton" class="secondary" onclick="runExport(true)">Re-backup</button>
-                <button id="alignFolderButton" class="secondary" onclick="alignExistingFolder()">Align Existing</button>
-            </div>
-            <div class="track-warning">IF HAVE SOLO TRACK: UNCHECK TO EXPORT</div>
-            <div id="exportSelectionList" class="selection-list">
-                <div class="small-note">Refresh to load tracks.</div>
-            </div>
-        </div>
-
-        <div class="action-line">
-            <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Folder</button>
-            <div class="path-box action-value value-text" id="exportPath">No folder selected yet.</div>
-        </div>
-
-        <div class="inline-options">
-            <label class="option">
-                <input type="checkbox" id="removeSequenceMarkersCheckbox" checked>
-                <span>Remove sequence markers</span>
-            </label>
-            <label class="option">
-                <input type="checkbox" id="copyProjectFileCheckbox">
-                <span>Copy project file</span>
-            </label>
-            <label class="option">
-                <input type="checkbox" id="alignSortProjectFilesCheckbox">
-                <span>Sort project files</span>
-            </label>
         </div>
 
     </section>

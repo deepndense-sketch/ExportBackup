@@ -1,5 +1,5 @@
 {
-  "version": "2.2.2",
+  "version": "3.0.0",
   "channel": "main",
-  "notes": "Release 2.2.2 makes the Premiere panel version button turn blue when an update is available and show Latest Version when the installed release is current."
+  "notes": "Release 3.0.0 adds a default-open visual Hide/Show control for Queue Backup Exports and includes the robust re-backup cleanup, exact video-state restoration, exclusive backup audio, and single final project save."
 }

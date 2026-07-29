@@ -112,18 +112,50 @@ p {
     white-space: nowrap;
 }
 
+.track-choice-separator {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.track-stepper {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
 .track-row input {
-    height: 38px;
-    width: 64px;
-    border-radius: 12px;
+    height: 32px;
+    width: 46px;
+    border-radius: 10px;
     border: 1px solid rgba(255, 138, 61, 0.45);
     background: #202731;
     color: var(--text);
-    padding: 8px 12px;
+    padding: 5px 6px;
     font: inherit;
-    font-size: 17px;
+    font-size: 14px;
     font-weight: 800;
     text-align: center;
+}
+
+.track-step-button {
+    width: 26px;
+    height: 32px;
+    padding: 0;
+    border-radius: 9px;
+    background: rgba(49, 64, 77, 0.5);
+    color: #bfd2e3;
+    border: 1px solid rgba(97, 168, 255, 0.18);
+    font-size: 14px;
+    line-height: 1;
+}
+
+.track-row input:disabled,
+.track-step-button:disabled {
+    opacity: 0.45;
+    border-color: rgba(154, 168, 184, 0.22);
+    cursor: not-allowed;
 }
 
 .track-warning {
@@ -153,21 +185,28 @@ button.preset-button,
     border: 1px solid var(--line);
 }
 
+#exportButton,
+#rebackupButton,
+#alignFolderButton {
+    padding: 10px 14px;
+    font-size: 13px;
+}
+
 #exportButton {
     background: linear-gradient(135deg, #ff9d57, #ff6d1f);
 }
 
 #rebackupButton {
-    padding: 13px 18px;
-    font-size: inherit;
+    padding: 10px 14px;
+    font-size: 13px;
     background: rgba(255, 157, 87, 0.16);
     color: #e8bd96;
     border-color: rgba(255, 157, 87, 0.24);
 }
 
 #alignFolderButton {
-    padding: 13px 18px;
-    font-size: inherit;
+    padding: 10px 14px;
+    font-size: 13px;
     background: rgba(255, 192, 111, 0.15);
     color: #e8c998;
     border-color: rgba(255, 192, 111, 0.22);
@@ -215,10 +254,10 @@ button.preset-button,
     border-color: rgba(97, 168, 255, 0.18);
 }
 
-button.preset-button,
 button.preset-button {
-    padding: 13px 18px;
-    font-size: inherit;
+    padding: 9px 12px;
+    font-size: 12px;
+    min-height: 36px;
 }
 
 .text-toggle {
@@ -304,6 +343,13 @@ button:disabled {
     white-space: pre-wrap;
 }
 
+.status-box.is-success {
+    background: rgba(63, 185, 104, 0.15);
+    border-color: rgba(86, 226, 135, 0.5);
+    color: #d9f7e1;
+    box-shadow: inset 0 0 0 1px rgba(86, 226, 135, 0.08);
+}
+
 .action-line {
     display: grid;
     grid-template-columns: auto 1fr;
@@ -317,10 +363,46 @@ button:disabled {
     align-items: center;
 }
 
+.preset-toggle-row {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: -4px;
+}
+
 .value-text {
     font-size: 12px;
     line-height: 1.4;
     color: #cfd8e3;
+}
+
+#presetSection {
+    gap: 10px;
+    padding: 10px;
+    background: rgba(97, 168, 255, 0.055);
+    border: 1px solid rgba(97, 168, 255, 0.14);
+    border-radius: 12px;
+}
+
+.folder-action-line,
+#presetSection .action-line {
+    grid-template-columns: 118px minmax(0, 1fr);
+    gap: 8px;
+}
+
+.folder-action-line .path-box,
+#presetSection .path-box {
+    padding: 10px 12px;
+    border-radius: 12px;
+}
+
+.folder-action-line .action-value,
+#presetSection .action-value {
+    min-height: 36px;
+}
+
+#presetSection .value-text {
+    font-size: 11px;
+    line-height: 1.35;
 }
 
 .option {
@@ -411,6 +493,12 @@ button:disabled {
     margin-bottom: 0;
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .section-heading #updateButton {
     padding: 8px 12px;
     font-size: 12px;
@@ -421,6 +509,7 @@ button:disabled {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    margin-top: 10px;
 }
 
 #toggleQueueBackupSectionButton {
@@ -487,6 +576,11 @@ button:disabled {
         grid-template-columns: 1fr;
     }
 
+    .folder-action-line,
+    #presetSection .action-line {
+        grid-template-columns: 118px minmax(0, 1fr);
+    }
+
     .nowrap {
         flex-wrap: wrap;
     }
@@ -501,37 +595,30 @@ button:disabled {
         <div>
             <div class="section-heading">
                 <div class="section-label">Backup</div>
-                <button id="updateButton" class="secondary" onclick="runGithubUpdate()">Version ...</button>
+                <div class="header-actions">
+                    <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh</button>
+                    <button id="updateButton" class="secondary" onclick="runGithubUpdate()">Version ...</button>
+                    <button id="toggleQueueBackupSectionButton" class="text-toggle" onclick="toggleQueueBackupSection()">Hide</button>
+                </div>
             </div>
             <div class="queue-section-heading">
                 <h2>Queue Backup Exports</h2>
-                <button id="toggleQueueBackupSectionButton" class="text-toggle" onclick="toggleQueueBackupSection()">Hide</button>
             </div>
         </div>
 
         <div id="queueBackupSectionContent" class="stack">
             <div class="track-row">
-                <label for="exportVideoTrackInput">BACKUP TRACK</label>
-                <input id="exportVideoTrackInput" type="number" min="1" value="5">
-                <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh</button>
-                <button id="togglePresetSectionButton" class="text-toggle" onclick="togglePresetSection()">Show Presets</button>
-            </div>
-
-            <div id="presetSection" class="stack">
-                <div class="action-line">
-                    <button id="chooseVideoPresetButton" class="preset-button" onclick="chooseVideoPreset()">Video Preset</button>
-                    <div class="path-box action-value value-text" id="videoPresetPath"></div>
+                <label for="exportVideoTrackInput">BACKUP TO</label>
+                <div class="track-stepper">
+                    <button id="decrementBackupTrackButton" class="track-step-button" type="button" title="Lower backup track">-</button>
+                    <input id="exportVideoTrackInput" type="number" min="1" value="5">
+                    <button id="incrementBackupTrackButton" class="track-step-button" type="button" title="Higher backup track">+</button>
                 </div>
-
-                <div class="action-line">
-                    <button id="chooseMp3PresetButton" class="preset-button" onclick="chooseMp3Preset()">MP3 Preset</button>
-                    <div class="path-box action-value value-text" id="mp3PresetPath"></div>
-                </div>
-
-                <div class="action-line">
-                    <button id="chooseWavPresetButton" class="preset-button" onclick="chooseWavPreset()">WAV Preset</button>
-                    <div class="path-box action-value value-text" id="wavPresetPath"></div>
-                </div>
+                <span class="track-choice-separator">or</span>
+                <label class="option compact-option" title="Choose the lowest empty video track automatically. If no empty video track exists, ExportBackup creates a new empty top video track.">
+                    <input type="checkbox" id="autoEmptyBackupTrackCheckbox">
+                    <span>TO EMPTY TRACK</span>
+                </label>
             </div>
 
             <div class="small-note">Turn off any <strong>soloed audio tracks</strong> before export. <strong>Re-backup</strong> ignores the queue checkboxes, uses original-track audio only, and restores backup clips to their recorded positions. <strong>Align Existing</strong> also recovers completed <code>_REBKP_TEMP</code> files when old media could not be replaced. Use <strong>Merge Selection</strong> after ticking audio tracks you want grouped together.</div>
@@ -575,9 +662,29 @@ button:disabled {
             </div>
         </div>
 
-        <div class="action-line">
+        <div class="action-line folder-action-line">
             <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Folder</button>
             <div class="path-box action-value value-text" id="exportPath">No folder selected yet.</div>
+        </div>
+        <div class="preset-toggle-row">
+            <button id="togglePresetSectionButton" class="text-toggle" onclick="togglePresetSection()">Change Export Presets</button>
+        </div>
+
+        <div id="presetSection" class="stack">
+            <div class="action-line">
+                <button id="chooseVideoPresetButton" class="preset-button" onclick="chooseVideoPreset()">Video Preset</button>
+                <div class="path-box action-value value-text" id="videoPresetPath"></div>
+            </div>
+
+            <div class="action-line">
+                <button id="chooseMp3PresetButton" class="preset-button" onclick="chooseMp3Preset()">MP3 Preset</button>
+                <div class="path-box action-value value-text" id="mp3PresetPath"></div>
+            </div>
+
+            <div class="action-line">
+                <button id="chooseWavPresetButton" class="preset-button" onclick="chooseWavPreset()">WAV Preset</button>
+                <div class="path-box action-value value-text" id="wavPresetPath"></div>
+            </div>
         </div>
 
         <div class="inline-options">

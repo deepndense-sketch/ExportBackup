@@ -83,8 +83,28 @@ function getDefaultWavPresetPath() {
     return getBundledPresetPath("wav.epr");
 }
 
-function setStatus(message) {
-    document.getElementById("statusBox").textContent = message;
+function setStatus(message, kind) {
+    const statusBox = document.getElementById("statusBox");
+    if (!statusBox) {
+        return;
+    }
+
+    statusBox.textContent = message;
+    statusBox.classList.toggle("is-success", kind === "success");
+}
+
+function getCompletionStatusTitle(settings, manifest) {
+    if (settings && settings.autoTriggered) {
+        return manifest && manifest.rebackup
+            ? "Re-backup done without error."
+            : "Backup done without error.";
+    }
+
+    if (manifest && manifest.rebackup) {
+        return "Re-backup done without error.";
+    }
+
+    return "Align Existing done without error.";
 }
 
 function setPresetSectionVisibility(visible) {
@@ -97,7 +117,7 @@ function setPresetSectionVisibility(visible) {
     }
 
     presetSection.classList.toggle("is-hidden", !visible);
-    toggleButton.textContent = visible ? "Hide Presets" : "Show Presets";
+    toggleButton.textContent = visible ? "Hide Export Presets" : "Change Export Presets";
 
     try {
         localStorage.setItem(PRESET_SECTION_VISIBLE_STORAGE_KEY, visible ? "true" : "false");
@@ -135,6 +155,10 @@ function getAudioFormatInputs() {
 
 function getBackupVideoTrackInput() {
     return document.getElementById("exportVideoTrackInput");
+}
+
+function getAutoEmptyBackupTrackCheckbox() {
+    return document.getElementById("autoEmptyBackupTrackCheckbox");
 }
 
 function getAlignVideoTrackInput() {
@@ -177,6 +201,9 @@ function setBusyState(nextBusy) {
     setDisabled("alignSkipVideoCheckbox", nextBusy);
     setDisabled("alignSortProjectFilesCheckbox", nextBusy);
     setDisabled("refreshExportSelectionButton", nextBusy);
+    setDisabled("autoEmptyBackupTrackCheckbox", nextBusy);
+    setDisabled("decrementBackupTrackButton", nextBusy);
+    setDisabled("incrementBackupTrackButton", nextBusy);
     setDisabled("mergeAudioButton", nextBusy);
     setDisabled("updateButton", nextBusy);
 
@@ -207,6 +234,13 @@ function setBusyState(nextBusy) {
 
     if (getCopyProjectFileCheckbox()) {
         getCopyProjectFileCheckbox().disabled = nextBusy;
+    }
+
+    if (!nextBusy) {
+        setSelectedExportMode(getSelectedExportMode());
+        setSelectedAudioFormat(getSelectedAudioFormat());
+        const autoEmptyCheckbox = getAutoEmptyBackupTrackCheckbox();
+        setAutoEmptyBackupTrackEnabled(autoEmptyCheckbox && autoEmptyCheckbox.checked);
     }
 }
 
@@ -412,6 +446,11 @@ function loadSavedUiState() {
     presetSectionVisible = false;
 }
 
+function useAutoEmptyBackupTrack() {
+    const checkbox = getAutoEmptyBackupTrackCheckbox();
+    return !!(checkbox && checkbox.checked);
+}
+
 function saveBackupVideoTrack(trackNumber) {
     try {
         localStorage.setItem(BACKUP_VIDEO_TRACK_STORAGE_KEY, String(trackNumber));
@@ -454,6 +493,67 @@ function applyAlignDefaults(defaults, force) {
         parseInt((defaults && defaults.videoTrackNumber) || DEFAULT_BACKUP_VIDEO_TRACK, 10) || DEFAULT_BACKUP_VIDEO_TRACK
     );
     saveAlignVideoTrack(value);
+}
+
+function setAutoEmptyBackupTrackEnabled(enabled) {
+    const disabled = !!enabled;
+    const backupTrackInput = getBackupVideoTrackInput();
+    if (backupTrackInput) {
+        backupTrackInput.disabled = disabled;
+    }
+
+    ["decrementBackupTrackButton", "incrementBackupTrackButton"].forEach((id) => {
+        const button = document.getElementById(id);
+        if (button) {
+            button.disabled = disabled;
+        }
+    });
+}
+
+function resetAutoEmptyBackupTrackOption() {
+    const checkbox = getAutoEmptyBackupTrackCheckbox();
+    if (checkbox) {
+        checkbox.checked = false;
+    }
+    setAutoEmptyBackupTrackEnabled(false);
+}
+
+function bindAutoEmptyBackupTrackOption() {
+    const checkbox = getAutoEmptyBackupTrackCheckbox();
+    if (!checkbox) {
+        return;
+    }
+
+    checkbox.addEventListener("change", () => {
+        setAutoEmptyBackupTrackEnabled(checkbox.checked);
+    });
+}
+
+function bindBackupTrackStepper() {
+    const backupTrackInput = getBackupVideoTrackInput();
+    const decrementButton = document.getElementById("decrementBackupTrackButton");
+    const incrementButton = document.getElementById("incrementBackupTrackButton");
+    if (!backupTrackInput) {
+        return;
+    }
+
+    const stepTrack = (direction) => {
+        if (backupTrackInput.disabled) {
+            return;
+        }
+
+        const currentValue = getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK);
+        backupTrackInput.value = String(Math.max(1, currentValue + direction));
+        backupTrackInput.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+
+    if (decrementButton) {
+        decrementButton.addEventListener("click", () => stepTrack(-1));
+    }
+
+    if (incrementButton) {
+        incrementButton.addEventListener("click", () => stepTrack(1));
+    }
 }
 
 function markBackupInputsDirty() {
@@ -1031,7 +1131,7 @@ async function getActiveSequenceName() {
     return String(result || "").trim();
 }
 
-async function validateBackupExportSettings(backupVideoTrackNumber, selectedItems, allowExistingFiles) {
+async function validateBackupExportSettings(backupVideoTrackNumber, selectedItems, allowExistingFiles, autoEmptyTrack) {
     if (!(await ensureHostLoaded())) {
         return { ok: false, message: "Could not load Premiere host script." };
     }
@@ -1046,7 +1146,8 @@ async function validateBackupExportSettings(backupVideoTrackNumber, selectedItem
             `"${escapeForEvalScript(wavPresetPath || "")}",` +
             `"${escapeForEvalScript(getSelectedAudioFormat())}",` +
             `"${escapeForEvalScript(selectedItemsJson)}",` +
-            `${allowExistingFiles ? "true" : "false"}` +
+            `${allowExistingFiles ? "true" : "false"},` +
+            `${autoEmptyTrack ? "true" : "false"}` +
         `)`
     );
     return parseHostResult(result) || { ok: false, message: result || "Unknown validation error." };
@@ -1228,8 +1329,10 @@ function parseTrackNumberFromFileName(name, baseName) {
     return trackNumbers.length ? trackNumbers[0] : 0;
 }
 
-function normalizeAudioEntries(entries, baseName) {
+function normalizeAudioEntries(entries, baseName, preferredAudioFormat) {
     const normalized = [];
+    const indexesByTrackKey = {};
+    const preferredFormat = String(preferredAudioFormat || "").toLowerCase();
 
     (entries || []).forEach((entry) => {
         if (!entry || !entry.path || !fileExists(entry.path)) {
@@ -1258,18 +1361,49 @@ function normalizeAudioEntries(entries, baseName) {
             return;
         }
 
-        normalized.push({
+        const normalizedEntry = {
             path: entry.path,
             trackNumber,
             trackNumbers,
             name: fileName
-        });
+        };
+        const trackKey = trackNumbers.join("-");
+        const score = (preferredFormat && getAudioEntryFormat(normalizedEntry.path) === preferredFormat ? 100 : 0) + (entry.prefer === true ? 10 : 0);
+        normalizedEntry.matchScore = score;
+
+        if (Object.prototype.hasOwnProperty.call(indexesByTrackKey, trackKey)) {
+            const existingIndex = indexesByTrackKey[trackKey];
+            if (score > (normalized[existingIndex].matchScore || 0)) {
+                normalized[existingIndex] = normalizedEntry;
+            }
+            return;
+        }
+
+        indexesByTrackKey[trackKey] = normalized.length;
+        normalized.push(normalizedEntry);
     });
 
     normalized.sort((a, b) => a.trackNumber - b.trackNumber);
+    normalized.forEach((entry) => { delete entry.matchScore; });
     return normalized;
 }
+function getAudioEntryTrackKey(entry, baseName) {
+    if (!entry) {
+        return "";
+    }
 
+    const fileName = entry.name || path.basename(entry.path || "");
+    const parsedTrackNumbers = parseTrackNumbersFromFileName(fileName, baseName);
+    const trackNumbers = Array.isArray(entry.trackNumbers) && entry.trackNumbers.length
+        ? entry.trackNumbers
+        : (parsedTrackNumbers.length ? parsedTrackNumbers : [entry.trackNumber]);
+
+    return trackNumbers
+        .map((value) => parseInt(value, 10) || 0)
+        .filter((trackNumber) => trackNumber > 0)
+        .sort((a, b) => a - b)
+        .join("-");
+}
 function readManifestForSequence(folderPath, sequenceName) {
     if (!folderPath || !sequenceName) {
         return null;
@@ -1295,9 +1429,11 @@ function scanExportFolderForSequence(folderPath, sequenceName, manifest) {
     const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
     const lowerBase = sanitizedBase.toLowerCase();
     const backupPrefix = `${lowerBase}_backup.`;
+    const preferredAudioFormat = getSelectedAudioFormat();
 
     let videoPath = "";
     let audio = [];
+    let audioCandidates = [];
 
     if (manifest) {
         const expectedFiles = Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
@@ -1343,12 +1479,28 @@ function scanExportFolderForSequence(folderPath, sequenceName, manifest) {
         }
     });
 
-    audio = normalizeAudioEntries(audio, sanitizedBase);
+    audioCandidates = audio.slice();
+    audio = normalizeAudioEntries(audio, sanitizedBase, preferredAudioFormat);
+    const selectedAudioByTrackKey = {};
+    audio.forEach((entry) => {
+        selectedAudioByTrackKey[getAudioEntryTrackKey(entry, sanitizedBase)] = getPathComparisonKey(entry.path);
+    });
+    const staleAudioPaths = [];
+    const seenStaleAudioPaths = {};
+    audioCandidates.forEach((entry) => {
+        const trackKey = getAudioEntryTrackKey(entry, sanitizedBase);
+        const entryPathKey = getPathComparisonKey(entry.path);
+        if (trackKey && selectedAudioByTrackKey[trackKey] && selectedAudioByTrackKey[trackKey] !== entryPathKey && !seenStaleAudioPaths[entryPathKey]) {
+            seenStaleAudioPaths[entryPathKey] = true;
+            staleAudioPaths.push(entry.path);
+        }
+    });
 
     return {
         baseName: sanitizedBase,
         videoPath,
         audio,
+        staleAudioPaths,
         folderFiles: files,
         manifest: manifest || null
     };
@@ -1386,6 +1538,10 @@ function replaceRebackupFile(entry) {
         try {
             if (!fileExists(entry.path)) {
                 throw new Error(`New backup file was not found:\n${entry.path}`);
+            }
+
+            if (entry.oldFinalPath && entry.oldFinalPath !== entry.finalPath && fileExists(entry.oldFinalPath)) {
+                fs.unlinkSync(entry.oldFinalPath);
             }
 
             if (fileExists(entry.finalPath)) {
@@ -1430,6 +1586,25 @@ async function finalizeRebackupFiles(manifest) {
     return manifest;
 }
 
+function replacePathExtension(filePath, extension) {
+    const parsedPath = path.parse(filePath || "");
+    const resolvedExtension = String(extension || "").startsWith(".") ? String(extension || "") : `.${extension}`;
+    if (!parsedPath.dir || !parsedPath.name) {
+        return "";
+    }
+    return path.join(parsedPath.dir, `${parsedPath.name}${resolvedExtension}`);
+}
+
+function getOppositeAudioFormatPath(filePath) {
+    const extension = path.extname(filePath || "").toLowerCase();
+    if (extension === ".mp3") {
+        return replacePathExtension(filePath, ".wav");
+    }
+    if (extension === ".wav") {
+        return replacePathExtension(filePath, ".mp3");
+    }
+    return "";
+}
 function getRebackupFinalPath(tempPath) {
     if (!tempPath) {
         return "";
@@ -1452,6 +1627,16 @@ function getPathComparisonKey(filePath) {
     }
 }
 
+function getAudioEntryFormat(filePath) {
+    const extension = path.extname(filePath || "").toLowerCase();
+    if (extension === ".wav") {
+        return "wav";
+    }
+    if (extension === ".mp3") {
+        return "mp3";
+    }
+    return "";
+}
 function buildRebackupRecoveryEntry(tempPath, baseName) {
     const fileName = path.basename(tempPath || "");
     const lowerFileName = fileName.toLowerCase();
@@ -1482,6 +1667,7 @@ function buildRebackupRecoveryEntry(tempPath, baseName) {
         kind: "audio",
         path: tempPath,
         finalPath,
+        oldFinalPath: getOppositeAudioFormatPath(finalPath),
         trackNumber: trackNumbers[0],
         trackNumbers,
         name: fileName
@@ -1507,6 +1693,7 @@ function collectRebackupRecoveryEntries(folderPath, sequenceName, manifest) {
 
         const normalizedEntry = Object.assign({}, entry, {
             finalPath: derivedFinalPath,
+            oldFinalPath: entry.oldFinalPath || "",
             path: tempExists ? entry.path : derivedFinalPath,
             name: path.basename(tempExists ? entry.path : derivedFinalPath)
         });
@@ -1532,7 +1719,11 @@ function collectRebackupRecoveryEntries(folderPath, sequenceName, manifest) {
         .filter((entry) => entry.isFile() && entry.name.toUpperCase().includes(REBACKUP_TEMP_MARKER))
         .forEach((entry) => {
             const tempPath = path.join(folderPath, entry.name);
-            addEntry(buildRebackupRecoveryEntry(tempPath, baseName), true);
+            const recoveryEntry = buildRebackupRecoveryEntry(tempPath, baseName);
+            if (recoveryEntry) {
+                recoveryEntry.prefer = true;
+            }
+            addEntry(recoveryEntry, true);
         });
 
     return {
@@ -1580,6 +1771,54 @@ async function ensureRebackupTempFilesAreStable(entries) {
     }
 }
 
+function removeStaleAudioFormatFiles(stalePaths) {
+    (stalePaths || []).forEach((stalePath) => {
+        if (!stalePath) {
+            return;
+        }
+        removeFileIfExists(stalePath);
+    });
+}
+
+async function prepareAlignExistingCleanup(matchInfo) {
+    const stalePaths = matchInfo && Array.isArray(matchInfo.staleAudioPaths) ? matchInfo.staleAudioPaths : [];
+    const expectedFiles = [];
+
+    if (matchInfo && matchInfo.videoPath) {
+        expectedFiles.push({
+            kind: "video",
+            path: matchInfo.videoPath,
+            finalPath: matchInfo.videoPath
+        });
+    }
+
+    (matchInfo && Array.isArray(matchInfo.audio) ? matchInfo.audio : []).forEach((entry) => {
+        expectedFiles.push({
+            kind: "audio",
+            path: entry.path,
+            finalPath: entry.path,
+            oldFinalPath: "",
+            trackNumber: entry.trackNumber,
+            trackNumbers: entry.trackNumbers,
+            name: entry.name
+        });
+    });
+
+    stalePaths.forEach((stalePath) => {
+        expectedFiles.push({
+            kind: "audio",
+            path: stalePath,
+            finalPath: stalePath,
+            oldFinalPath: stalePath
+        });
+    });
+
+    if (expectedFiles.length) {
+        await prepareRebackupReplacement({ expectedFiles });
+    }
+
+    removeStaleAudioFormatFiles(stalePaths);
+}
 async function prepareRebackupReplacement(manifest) {
     if (!manifest || !Array.isArray(manifest.expectedFiles) || !manifest.expectedFiles.length) {
         return;
@@ -1784,6 +2023,8 @@ async function runAlignmentFlow(folderPath, options) {
             return false;
         }
 
+        await prepareAlignExistingCleanup(matchInfo);
+
         const backupVideoTrackNumber = getPositiveIntValue(
             "exportVideoTrackInput",
             (matchInfo.manifest && parseInt(matchInfo.manifest.backupVideoTrackNumber, 10)) || DEFAULT_BACKUP_VIDEO_TRACK
@@ -1818,7 +2059,8 @@ async function runAlignmentFlow(folderPath, options) {
             removeFileIfExists(matchInfo.manifest.manifestPath);
         }
 
-        const lines = [parsed.message || "Alignment completed."];
+        const successTitle = getCompletionStatusTitle(settings, matchInfo.manifest);
+        const lines = [successTitle, parsed.message || "Alignment completed."];
         if (parsed.importBinName) {
             lines.push(`Imported backup files were added to project bin: ${parsed.importBinName}`);
         }
@@ -1828,8 +2070,7 @@ async function runAlignmentFlow(folderPath, options) {
             lines.push(copyResult.message);
         }
 
-        setStatus(lines.join("\n"));
-        showBlockingMessage(settings.autoTriggered ? "Automatic import and alignment finished." : "Done.");
+        setStatus(lines.join("\n"), "success");
         return true;
     } catch (error) {
         const message = `Alignment failed.\n${error.message}`;
@@ -2040,6 +2281,7 @@ async function runExport(isRebackup) {
     const selectedAudioFormat = getSelectedAudioFormat();
     const selectedAudioPresetPath = selectedAudioFormat === "wav" ? wavPresetPath : mp3PresetPath;
     const backupVideoTrackNumber = getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK);
+    const autoEmptyTrack = !isRebackup && useAutoEmptyBackupTrack();
     const selectedQueueItems = getSelectedQueueItems();
     const removeSequenceMarkers = !!(getRemoveSequenceMarkersCheckbox() && getRemoveSequenceMarkersCheckbox().checked);
     const selectedExportMode = getSelectedExportMode();
@@ -2068,7 +2310,8 @@ async function runExport(isRebackup) {
         return;
     }
 
-    const validation = await validateBackupExportSettings(backupVideoTrackNumber, selectedQueueItems, isRebackup);
+    const validation = await validateBackupExportSettings(backupVideoTrackNumber, selectedQueueItems, isRebackup, autoEmptyTrack);
+    const resolvedBackupVideoTrackNumber = parseInt(validation.backupVideoTrackNumber, 10) || backupVideoTrackNumber;
     if (!validation.ok) {
         const message = validation.hasConflicts && !isRebackup
             ? formatExistingMediaMessage(validation)
@@ -2079,12 +2322,21 @@ async function runExport(isRebackup) {
         return;
     }
 
-    setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
-        ? (isRebackup ? "Rendering re-backup files in Premiere Pro...\nUsing original audio and the recorded backup layout; track selectors are ignored." : `Rendering backup files in Premiere Pro...\nBackup track: V${backupVideoTrackNumber}`)
-        : (isRebackup ? "Queueing re-backup jobs...\nUsing original audio and the recorded backup layout; track selectors are ignored." : `Queueing backup jobs...\nBackup track: V${backupVideoTrackNumber}`));
+
+    if (autoEmptyTrack) {
+        const backupTrackInput = getBackupVideoTrackInput();
+        if (backupTrackInput) {
+            backupTrackInput.value = String(resolvedBackupVideoTrackNumber);
+            backupTrackInput.dataset.autoValue = String(resolvedBackupVideoTrackNumber);
+        }
+        saveBackupVideoTrack(resolvedBackupVideoTrackNumber);
+    }
+setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
+        ? (isRebackup ? "Rendering checked re-backup files in Premiere Pro...\nUsing the recorded backup layout." : `Rendering backup files in Premiere Pro...\nBackup track: V${resolvedBackupVideoTrackNumber}`)
+        : (isRebackup ? "Queueing checked re-backup jobs...\nUsing the recorded backup layout." : `Queueing backup jobs...\nBackup track: V${resolvedBackupVideoTrackNumber}`));
 
     const selectedItemsJson = JSON.stringify(selectedQueueItems);
-    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}","${escapeForEvalScript(selectedAudioFormat)}",${backupVideoTrackNumber},${removeSequenceMarkers ? "true" : "false"},"${escapeForEvalScript(selectedItemsJson)}","${escapeForEvalScript(selectedExportMode)}",${isRebackup ? "true" : "false"})`;
+    const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}","${escapeForEvalScript(selectedAudioFormat)}",${resolvedBackupVideoTrackNumber},${removeSequenceMarkers ? "true" : "false"},"${escapeForEvalScript(selectedItemsJson)}","${escapeForEvalScript(selectedExportMode)}",${isRebackup ? "true" : "false"},${autoEmptyTrack ? "true" : "false"})`;
     const result = await callHost(script);
     const parsed = parseHostResult(result);
 
@@ -2150,6 +2402,9 @@ document.addEventListener("DOMContentLoaded", () => {
     bindAudioFormatInputs();
     bindAlignOptions();
     bindExportOptions();
+    bindAutoEmptyBackupTrackOption();
+    bindBackupTrackStepper();
+    resetAutoEmptyBackupTrackOption();
     markBackupInputsDirty();
     loadSavedBackupSettings();
     setQueueBackupSectionVisibility(true);

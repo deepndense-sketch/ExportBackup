@@ -30,9 +30,10 @@ function makeCollection(items, countProperty) {
     return collection;
 }
 
-function makeTrack(initialMute, clips) {
+function makeTrack(initialMute, clips, name) {
     let muted = initialMute ? 1 : 0;
     return {
+        name: name || '',
         clips: makeCollection(clips || [], 'numItems'),
         isMuted() {
             return muted;
@@ -111,8 +112,8 @@ test('Queue Backup Exports has a visual-only toggle and always starts shown', ()
 
 test('Queue Preview omits app-managed backup audio layers', () => {
     const sourceTrack = makeTrack(0, [{ projectItem: { name: 'Dialogue.wav' } }]);
-    const backupTrack = makeTrack(0, [{ projectItem: { name: 'Scene_BACKUP.mp4' } }]);
-    const managedAudioTrack = makeTrack(1, [{ projectItem: { name: 'Scene_Track1.mp3' } }]);
+    const backupTrack = makeTrack(0, [{ projectItem: { name: 'OtherSequence_BACKUP_REBKP_TEMP.mp4' } }]);
+    const managedAudioTrack = makeTrack(1, [{ projectItem: { name: 'AD_SM QUOTE No Pain Food_Track1.mp3' } }]);
     const sequence = {
         name: 'Scene',
         audioTracks: makeCollection(
@@ -141,6 +142,137 @@ test('Queue Preview omits app-managed backup audio layers', () => {
     );
 });
 
+test('re-backup ignores other sequence backup names and finds the active sequence backup', () => {
+    const sequence = {
+        name: 'Scene',
+        videoTracks: makeCollection([
+            makeTrack(0, [{ projectItem: { name: 'OtherSequence_BACKUP_REBKP_TEMP.mp4' } }]),
+            makeTrack(0, [{ projectItem: { name: 'Rendered Mix.mp4' } }], 'Scene_BACKUP')
+        ], 'numTracks'),
+        audioTracks: makeCollection([], 'numTracks')
+    };
+    const { context } = loadHostLogic();
+    context.sequenceUnderTest = sequence;
+
+    const result = JSON.parse(vm.runInContext(`JSON.stringify({
+        backupTrack: ebFindManagedBackupVideoTrackNumber(sequenceUnderTest, 'Scene'),
+        otherSequenceInfo: ebGetTrackSequenceManagedInfo(sequenceUnderTest.videoTracks[0], 'Scene'),
+        trackNameInfo: ebGetTrackSequenceManagedInfo(sequenceUnderTest.videoTracks[1], 'Scene')
+    })`, context));
+
+    assert.equal(result.backupTrack, 2);
+    assert.equal(result.otherSequenceInfo.hasBackup, false);
+    assert.equal(result.trackNameInfo.hasBackup, true);
+});
+
+test('re-backup output paths follow existing backup media paths', () => {
+    const sequence = {
+        name: 'Scene',
+        audioTracks: makeCollection([
+            makeTrack(0, [{ projectItem: { name: 'Dialogue.wav' } }]),
+            makeTrack(0, [{ projectItem: { name: 'Scene_BACKUP.mp4', getMediaPath() { return 'E:\\Existing\\Scene_BACKUP.mp4'; } } }], 'Scene_BACKUP'),
+            makeTrack(0, [{ projectItem: { name: 'Scene_Track1_REBKP_TEMP.mp3', getMediaPath() { return 'E:\\Existing\\Scene_Track1_REBKP_TEMP.mp3'; } } }], 'Scene_Track1')
+        ], 'numTracks'),
+        videoTracks: makeCollection([
+            makeTrack(0, [{ projectItem: { name: 'Scene_BACKUP.mp4', getMediaPath() { return 'E:\\Existing\\Scene_BACKUP.mp4'; } } }], 'Scene_BACKUP')
+        ], 'numTracks')
+    };
+    const { context } = loadHostLogic();
+    context.sequenceUnderTest = sequence;
+
+    const result = JSON.parse(vm.runInContext(`JSON.stringify((() => {
+        const layout = ebCaptureRebackupLayout(sequenceUnderTest, 'Scene');
+        return ebBuildRequestedOutputFiles(
+            sequenceUnderTest,
+            'D:\\Chosen',
+            'video.epr',
+            'audio.epr',
+            'mp3',
+            JSON.stringify({ includeVideo: true, audioTracks: [1], audioGroups: [] }),
+            true,
+            layout
+        );
+    })())`, context));
+
+    assert.equal(result[0].finalPath, 'E:\\Existing\\Scene_BACKUP.mp4');
+    assert.equal(result[0].path, 'E:\\Existing\\Scene_BACKUP_REBKP_TEMP.mp4');
+    assert.equal(result[1].finalPath, 'E:\\Existing\\Scene_Track1.mp3');
+    assert.equal(result[1].path, 'E:\\Existing\\Scene_Track1_REBKP_TEMP.mp3');
+});
+
+test('re-backup audio format changes render selected format and release old audio path', () => {
+    const sequence = {
+        name: 'Scene',
+        audioTracks: makeCollection([
+            makeTrack(0, [{ projectItem: { name: 'Dialogue.wav' } }]),
+            makeTrack(0, [{ projectItem: { name: 'Scene_Track1.mp3', getMediaPath() { return 'E:\\Existing\\Scene_Track1.mp3'; } } }], 'Scene_Track1')
+        ], 'numTracks'),
+        videoTracks: makeCollection([
+            makeTrack(0, [{ projectItem: { name: 'Scene_BACKUP.mp4', getMediaPath() { return 'E:\\Existing\\Scene_BACKUP.mp4'; } } }], 'Scene_BACKUP')
+        ], 'numTracks')
+    };
+    const { context } = loadHostLogic();
+    context.sequenceUnderTest = sequence;
+
+    const result = JSON.parse(vm.runInContext(`JSON.stringify((() => {
+        const layout = ebCaptureRebackupLayout(sequenceUnderTest, 'Scene');
+        const files = ebBuildRequestedOutputFiles(
+            sequenceUnderTest,
+            'D:\\Chosen',
+            'video.epr',
+            'audio.epr',
+            'wav',
+            JSON.stringify({ includeVideo: true, audioTracks: [1], audioGroups: [] }),
+            true,
+            layout
+        );
+        return {
+            files,
+            releasePaths: ebGetRebackupReleasePaths(files)
+        };
+    })())`, context));
+
+    assert.equal(result.files[1].path, 'E:\\Existing\\Scene_Track1_REBKP_TEMP.wav');
+    assert.equal(result.files[1].finalPath, 'E:\\Existing\\Scene_Track1.wav');
+    assert.equal(result.files[1].oldFinalPath, 'E:\\Existing\\Scene_Track1.mp3');
+    assert.ok(result.releasePaths.includes('E:\\Existing\\Scene_Track1.mp3'));
+});
+
+test('re-backup respects unchecked backup video and checked audio items', () => {
+    const sequence = {
+        name: 'Scene',
+        audioTracks: makeCollection([
+            makeTrack(0, [{ projectItem: { name: 'Dialogue A1.wav' } }]),
+            makeTrack(0, [{ projectItem: { name: 'Dialogue A2.wav' } }]),
+            makeTrack(0, [{ projectItem: { name: 'Scene_Track1.mp3', getMediaPath() { return 'E:\\Existing\\Scene_Track1.mp3'; } } }], 'Scene_Track1'),
+            makeTrack(0, [{ projectItem: { name: 'Scene_Track2.mp3', getMediaPath() { return 'E:\\Existing\\Scene_Track2.mp3'; } } }], 'Scene_Track2')
+        ], 'numTracks'),
+        videoTracks: makeCollection([
+            makeTrack(0, [{ projectItem: { name: 'Scene_BACKUP.mp4', getMediaPath() { return 'E:\\Existing\\Scene_BACKUP.mp4'; } } }], 'Scene_BACKUP')
+        ], 'numTracks')
+    };
+    const { context } = loadHostLogic();
+    context.sequenceUnderTest = sequence;
+
+    const result = JSON.parse(vm.runInContext(`JSON.stringify((() => {
+        const layout = ebCaptureRebackupLayout(sequenceUnderTest, 'Scene');
+        return ebBuildRequestedOutputFiles(
+            sequenceUnderTest,
+            'D:\\Chosen',
+            'video.epr',
+            'audio.epr',
+            'mp3',
+            JSON.stringify({ includeVideo: false, audioTracks: [2], audioGroups: [] }),
+            true,
+            layout
+        );
+    })())`, context));
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0].kind, 'audio');
+    assert.deepEqual(result[0].trackNumbers, [2]);
+    assert.equal(result[0].finalPath, 'E:\\Existing\\Scene_Track2.mp3');
+});
 test('video visibility is restored exactly after export-only hiding', () => {
     const { context, source } = loadHostLogic();
     const tracks = [
@@ -575,4 +707,119 @@ test('Premiere project is saved only once after import and alignment', () => {
     assert.equal(saveCalls.length, 1);
     assert.ok(savePosition > importPosition);
     assert.ok(savePosition > audioPolicyPosition);
+});
+test('successful backup and re-backup use green status text instead of plain Done alerts', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+
+    assert.match(html, /\.status-box\.is-success/);
+    assert.match(mainSource, /Backup done without error\./);
+    assert.match(mainSource, /Re-backup done without error\./);
+    assert.match(mainSource, /setStatus\(lines\.join\("\\n"\), "success"\)/);
+    assert.doesNotMatch(mainSource, /showBlockingMessage\(settings\.autoTriggered \? "Automatic import and alignment finished\." : "Done\."\)/);
+});
+
+test('normal backup reports existing backup media before empty-track errors', () => {
+    const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
+    const existingMessageIndex = hostSource.indexOf('Backup files are already there. Use Re-backup.');
+    const emptyTrackIndex = hostSource.indexOf('ebValidateBackupTrack(sequence, backupVideoTrackNumber, true, sequenceBaseName);', existingMessageIndex);
+
+    assert.notEqual(existingMessageIndex, -1);
+    assert.notEqual(emptyTrackIndex, -1);
+    assert.ok(existingMessageIndex < emptyTrackIndex);
+});
+test('automatic empty backup track option is visible and unchecked by default', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+
+    assert.match(html, /id="autoEmptyBackupTrackCheckbox"/);
+    assert.doesNotMatch(html, /id="autoEmptyBackupTrackCheckbox" checked/);
+    assert.match(html, />TO EMPTY TRACK</);
+    assert.match(html, /BACKUP TO[\s\S]*id="decrementBackupTrackButton"[\s\S]*id="exportVideoTrackInput"[\s\S]*id="incrementBackupTrackButton"[\s\S]*class="track-choice-separator">or<\/span>[\s\S]*TO EMPTY TRACK/);
+    assert.match(html, /class="action-line folder-action-line"[\s\S]*id="chooseFolderButton"[\s\S]*id="exportPath"[\s\S]*id="togglePresetSectionButton"[\s\S]*Change Export Presets[\s\S]*id="presetSection"/);
+    assert.equal((html.match(/id="togglePresetSectionButton"/g) || []).length, 1);
+    assert.match(html, /id="refreshExportSelectionButton"[\s\S]*id="updateButton"[\s\S]*id="toggleQueueBackupSectionButton"/);
+    assert.match(mainSource, /function resetAutoEmptyBackupTrackOption\(\)/);
+    assert.match(mainSource, /function bindAutoEmptyBackupTrackOption\(\)/);
+    assert.match(mainSource, /function bindBackupTrackStepper\(\)/);
+    assert.match(mainSource, /backupTrackInput\.disabled = disabled/);
+    assert.match(mainSource, /button\.disabled = disabled/);
+    assert.match(mainSource, /checkbox\.checked = false/);
+    assert.doesNotMatch(mainSource, /autoEmptyBackupTrack.*localStorage|localStorage.*autoEmptyBackupTrack/);
+    assert.match(mainSource, /validateBackupExportSettings\(backupVideoTrackNumber, selectedQueueItems, isRebackup, autoEmptyTrack\)/);
+});
+
+
+
+test('Align Existing prefers selected audio format and cleans opposite-format recovery files', () => {
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+
+    assert.match(mainSource, /const preferredAudioFormat = getSelectedAudioFormat\(\)/);
+    assert.match(mainSource, /normalizeAudioEntries\(audio, sanitizedBase, preferredAudioFormat\)/);
+    assert.match(mainSource, /getAudioEntryFormat\(normalizedEntry\.path\) === preferredFormat/);
+    assert.match(mainSource, /oldFinalPath: getOppositeAudioFormatPath\(finalPath\)/);
+    assert.match(mainSource, /fs\.unlinkSync\(entry\.oldFinalPath\)/);
+});
+
+test('Align Existing removes sequence-managed backup clips before target-track emptiness check', () => {
+    const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
+
+    assert.match(hostSource, /shouldRemove = ebIsManagedBackupTrack\(clipName, baseName\) \|\| ebIsSequenceManagedBackupTrack\(clipName, baseName\)/);
+    assert.match(
+        hostSource,
+        /ebRemoveManagedClipsFromTrack\(sequence\.videoTracks\[resolvedBackupTrack - 1\], sequenceBaseName, "backup", 0\);[\s\S]*if \(videoPath && ebTrackHasClips\(sequence\.videoTracks\[resolvedBackupTrack - 1\]\)\)/
+    );
+});
+test('automatic backup track selection picks the lowest empty video track', () => {
+    const { context } = loadHostLogic();
+    const sequence = {
+        videoTracks: makeCollection([
+            makeTrack(0, [{ projectItem: { name: 'V1.mov' } }]),
+            makeTrack(0, [{ projectItem: { name: 'V2.mov' } }]),
+            makeTrack(0, [{ projectItem: { name: 'V3.mov' } }]),
+            makeTrack(0, [{ projectItem: { name: 'V4.mov' } }]),
+            makeTrack(0, [{ projectItem: { name: 'V5.mov' } }]),
+            makeTrack(0),
+            makeTrack(0, [{ projectItem: { name: 'V7.mov' } }]),
+            makeTrack(0)
+        ], 'numTracks')
+    };
+    context.sequenceUnderTest = sequence;
+
+    const result = vm.runInContext('ebResolveBackupVideoTrackNumber(sequenceUnderTest, 5, true, false)', context);
+
+    assert.equal(result, 6);
+});
+
+test('automatic backup track selection creates a new top video track when none are empty', () => {
+    const { context } = loadHostLogic();
+    const tracks = [
+        makeTrack(0, [{ projectItem: { name: 'V1.mov' } }]),
+        makeTrack(0, [{ projectItem: { name: 'V2.mov' } }])
+    ];
+    const sequence = {
+        videoTracks: makeCollection(tracks, 'numTracks')
+    };
+    context.sequenceUnderTest = sequence;
+    context.qe = {
+        project: {
+            getActiveSequence() {
+                return {
+                    addTracks(videoTracksToAdd) {
+                        for (let i = 0; i < videoTracksToAdd; i += 1) {
+                            tracks.push(makeTrack(0));
+                            sequence.videoTracks[sequence.videoTracks.numTracks] = tracks[tracks.length - 1];
+                            sequence.videoTracks.numTracks = tracks.length;
+                        }
+                    }
+                };
+            }
+        }
+    };
+
+    const result = vm.runInContext('ebResolveBackupVideoTrackNumber(sequenceUnderTest, 5, true, true)', context);
+
+    assert.equal(result, 3);
+    assert.equal(sequence.videoTracks.numTracks, 3);
+    assert.equal(sequence.videoTracks[2].clips.numItems, 0);
 });

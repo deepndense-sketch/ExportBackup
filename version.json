@@ -1,5 +1,5 @@
 {
-  "version": "3.1.0",
+  "version": "4.0.0",
   "channel": "main",
-  "notes": "Release 3.1.0 limits Hide/Show to the settings above Queue Preview, keeps Queue Preview and its actions visible, and omits app-managed backup audio layers from the selectable track list."
+  "notes": "Release 4.0.0 makes Re-backup respect checked queue items, improves Align Existing re-alignment and audio-format cleanup, adds selected-format MP3/WAV replacement, and refreshes the backup UI controls."
 }

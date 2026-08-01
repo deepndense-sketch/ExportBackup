@@ -46,6 +46,7 @@ let exportMonitorState = null;
 let exportSelectionState = null;
 let mergedAudioGroups = [];
 let nextMergedAudioGroupId = 1;
+let inOutPromptResolver = null;
 
 function getExtensionRootPath() {
     try {
@@ -322,6 +323,67 @@ function showResultPrompt(title, message) {
     }
     showBlockingMessage(lines.join("\n\n"));
 }
+
+function closeInOutPrompt(shouldAutoSet) {
+    const prompt = document.getElementById("inOutPrompt");
+    const checkbox = document.getElementById("autoSetInOutCheckbox");
+    const resolve = inOutPromptResolver;
+    const confirmed = shouldAutoSet === true && !!(checkbox && checkbox.checked);
+
+    inOutPromptResolver = null;
+    if (prompt) {
+        prompt.classList.add("is-hidden");
+    }
+    if (resolve) {
+        resolve(confirmed);
+    }
+}
+
+function showInOutPrompt() {
+    const prompt = document.getElementById("inOutPrompt");
+    const checkbox = document.getElementById("autoSetInOutCheckbox");
+    const okButton = document.getElementById("inOutPromptOkButton");
+
+    if (!prompt || !checkbox || !okButton) {
+        return Promise.resolve(false);
+    }
+
+    if (inOutPromptResolver) {
+        closeInOutPrompt(false);
+    }
+
+    checkbox.checked = true;
+    okButton.disabled = false;
+    prompt.classList.remove("is-hidden");
+    setTimeout(() => okButton.focus(), 0);
+
+    return new Promise((resolve) => {
+        inOutPromptResolver = resolve;
+    });
+}
+
+function bindInOutPrompt() {
+    const prompt = document.getElementById("inOutPrompt");
+    const checkbox = document.getElementById("autoSetInOutCheckbox");
+    const okButton = document.getElementById("inOutPromptOkButton");
+    const cancelButton = document.getElementById("inOutPromptCancelButton");
+    if (!prompt || !checkbox || !okButton || !cancelButton) {
+        return;
+    }
+
+    checkbox.addEventListener("change", () => {
+        okButton.disabled = !checkbox.checked;
+    });
+    okButton.addEventListener("click", () => closeInOutPrompt(true));
+    cancelButton.addEventListener("click", () => closeInOutPrompt(false));
+    prompt.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            event.preventDefault();
+            closeInOutPrompt(false);
+        }
+    });
+}
+
 function showAlignmentRecoveryError(details) {
     const lines = ["IMPORT NOT COMPLETED", ALIGNMENT_RECOVERY_TEXT];
     if (details) {
@@ -1149,6 +1211,15 @@ async function getActiveSequenceName() {
 
     const result = await callHost("exportBackup.getActiveSequenceName()");
     return String(result || "").trim();
+}
+
+async function setActiveSequenceInOutToFullRange() {
+    if (!(await ensureHostLoaded())) {
+        return { ok: false, message: "Could not load Premiere host script." };
+    }
+
+    const result = await callHost("exportBackup.setActiveSequenceInOutToFullRange()");
+    return parseHostResult(result) || { ok: false, message: result || "Could not set sequence In and Out." };
 }
 
 async function validateBackupExportSettings(backupVideoTrackNumber, selectedItems, allowExistingFiles, autoEmptyTrack) {
@@ -2643,7 +2714,28 @@ async function runExport(isRebackup) {
         return;
     }
 
-    const validation = await validateBackupExportSettings(backupVideoTrackNumber, selectedQueueItems, isRebackup, autoEmptyTrack);
+    let validation = await validateBackupExportSettings(backupVideoTrackNumber, selectedQueueItems, isRebackup, autoEmptyTrack);
+    if (!validation.ok && validation.needsInOut === true) {
+        const shouldAutoSetInOut = await showInOutPrompt();
+        if (!shouldAutoSetInOut) {
+            setStatus("Export cancelled. Set sequence In and Out manually, then start Backup or Re-backup again.");
+            setBusyState(false);
+            return;
+        }
+
+        setStatus("Setting In and Out to the full sequence range...");
+        const inOutResult = await setActiveSequenceInOutToFullRange();
+        if (!inOutResult.ok) {
+            const message = inOutResult.message || "Could not set sequence In and Out.";
+            setStatus(message, "error");
+            showBlockingMessage(message);
+            setBusyState(false);
+            return;
+        }
+
+        setStatus("Sequence In and Out set. Starting export...");
+        validation = await validateBackupExportSettings(backupVideoTrackNumber, selectedQueueItems, isRebackup, autoEmptyTrack);
+    }
     const resolvedBackupVideoTrackNumber = parseInt(validation.backupVideoTrackNumber, 10) || backupVideoTrackNumber;
     if (!validation.ok) {
         const message = validation.hasConflicts && !isRebackup
@@ -2746,6 +2838,7 @@ document.addEventListener("DOMContentLoaded", () => {
     bindExportOptions();
     bindAutoEmptyBackupTrackOption();
     bindBackupTrackStepper();
+    bindInOutPrompt();
     resetAutoEmptyBackupTrackOption();
     markBackupInputsDirty();
     loadSavedBackupSettings();

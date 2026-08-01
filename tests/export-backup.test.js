@@ -277,6 +277,12 @@ test('re-backup respects unchecked backup video and checked audio items', () => 
 test('re-backup can export a new MP4 when the old backup video clip is missing', () => {
     const sequence = {
         name: 'Scene',
+        getInPoint() {
+            return '0';
+        },
+        getOutPoint() {
+            return '10';
+        },
         videoTracks: makeCollection([makeTrack(0)], 'numTracks'),
         audioTracks: makeCollection([], 'numTracks')
     };
@@ -303,6 +309,59 @@ test('re-backup can export a new MP4 when the old backup video clip is missing',
 
     assert.equal(result.ok, true);
     assert.equal(result.backupVideoTrackNumber, 1);
+});
+
+test('missing sequence In and Out can be set to the full sequence range', () => {
+    let inPoint = 0;
+    let outPoint = 0;
+    let receivedOutTicks = '';
+    const sequence = {
+        name: 'Scene',
+        end: '508032000000',
+        getInPoint() {
+            return String(inPoint);
+        },
+        getOutPoint() {
+            return String(outPoint);
+        },
+        setInPoint(value) {
+            inPoint = parseFloat(value) || 0;
+        },
+        setOutPoint(value) {
+            receivedOutTicks = String(value.ticks || '');
+            outPoint = 2;
+        },
+        videoTracks: makeCollection([makeTrack(0)], 'numTracks'),
+        audioTracks: makeCollection([], 'numTracks')
+    };
+    const { context } = loadHostLogic({
+        project: {
+            activeSequence: sequence,
+            rootItem: { type: 2, children: makeCollection([], 'numItems') },
+            sequences: makeCollection([sequence], 'numSequences'),
+            save() {}
+        }
+    });
+
+    const missingResult = JSON.parse(context.exportBackup.validateBackupExportSettings(
+        1,
+        'D:\\Backups',
+        'video.epr',
+        'mp3.epr',
+        'wav.epr',
+        'mp3',
+        JSON.stringify({ includeVideo: true, audioTracks: [], audioGroups: [] }),
+        false,
+        false
+    ));
+    const setResult = JSON.parse(context.exportBackup.setActiveSequenceInOutToFullRange());
+
+    assert.equal(missingResult.ok, false);
+    assert.equal(missingResult.needsInOut, true);
+    assert.equal(setResult.ok, true);
+    assert.equal(inPoint, 0);
+    assert.equal(outPoint, 2);
+    assert.equal(receivedOutTicks, sequence.end);
 });
 
 test('empty renamed managed audio tracks do not count as existing backup media', () => {
@@ -868,10 +927,10 @@ test('Premiere cleanup saves and settles before local re-backup replacement', ()
     assert.match(hostSource, /projectSavedForRelease: projectSavedForRelease/);
 });
 
-test('backup MP4 project item is labeled brown after import', () => {
+test('all imported backup video and audio media are labeled brown', () => {
     let appliedLabel = -1;
     const { context } = loadHostLogic();
-    context.videoItemUnderTest = {
+    context.mediaItemUnderTest = {
         setColorLabel(labelIndex) {
             appliedLabel = labelIndex;
             return 0;
@@ -879,7 +938,7 @@ test('backup MP4 project item is labeled brown after import', () => {
     };
 
     const result = vm.runInContext(
-        'ebSetProjectItemColorLabel(videoItemUnderTest, EB_BACKUP_VIDEO_BROWN_LABEL_INDEX)',
+        'ebSetProjectItemColorLabel(mediaItemUnderTest, EB_BACKUP_MEDIA_BROWN_LABEL_INDEX)',
         context
     );
     const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
@@ -889,7 +948,8 @@ test('backup MP4 project item is labeled brown after import', () => {
 
     assert.equal(result, true);
     assert.equal(appliedLabel, 14);
-    assert.match(alignSource, /ebSetProjectItemColorLabel\(videoItem, EB_BACKUP_VIDEO_BROWN_LABEL_INDEX\)/);
+    assert.match(alignSource, /ebSetProjectItemColorLabel\(videoItem, EB_BACKUP_MEDIA_BROWN_LABEL_INDEX\)/);
+    assert.match(alignSource, /ebSetProjectItemColorLabel\(audioItem, EB_BACKUP_MEDIA_BROWN_LABEL_INDEX\)/);
 });
 
 test('Premiere project is saved only once after import and alignment', () => {
@@ -959,6 +1019,27 @@ test('automatic empty backup track option is visible and unchecked by default', 
 });
 
 
+
+test('missing In and Out prompt can auto-set the full range or cancel', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
+
+    assert.match(html, /id="inOutPrompt"/);
+    assert.match(html, /id="autoSetInOutCheckbox" checked/);
+    assert.match(html, /id="inOutPromptCancelButton"[^>]*>Cancel</);
+    assert.match(html, /id="inOutPromptOkButton"[^>]*>OK</);
+    assert.match(mainSource, /checkbox\.checked = true/);
+    assert.match(mainSource, /okButton\.disabled = !checkbox\.checked/);
+    assert.match(mainSource, /if \(!validation\.ok && validation\.needsInOut === true\)/);
+    assert.match(mainSource, /const shouldAutoSetInOut = await showInOutPrompt\(\)/);
+    assert.match(mainSource, /const inOutResult = await setActiveSequenceInOutToFullRange\(\)/);
+    assert.match(mainSource, /validation = await validateBackupExportSettings\(/);
+    assert.match(mainSource, /Export cancelled\. Set sequence In and Out manually/);
+    assert.match(hostSource, /exportBackup\.setActiveSequenceInOutToFullRange = function/);
+    assert.match(hostSource, /sequence\.setInPoint\(0\)/);
+    assert.match(hostSource, /sequence\.setOutPoint\(endTime\)/);
+});
 
 test('Align Existing prefers selected audio format and cleans opposite-format recovery files', () => {
     const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');

@@ -98,7 +98,7 @@ var EB_ENCODER_LAUNCH_WAIT_MS = 20000;
 var EB_ENCODER_QUEUE_SETTLE_WAIT_MS = 10000;
 var EB_MEDIA_RELEASE_WAIT_MS = 2500;
 var EB_MEDIA_RELEASE_SAVE_WAIT_MS = 1500;
-var EB_BACKUP_VIDEO_BROWN_LABEL_INDEX = 14;
+var EB_BACKUP_MEDIA_BROWN_LABEL_INDEX = 14;
 
 function ebEscape(value) {
     if (value === null || value === undefined) {
@@ -195,6 +195,27 @@ function ebSequenceHasInOut(sequence) {
         var outPoint = parseFloat(sequence.getOutPoint());
         return !isNaN(inPoint) && !isNaN(outPoint) && outPoint > inPoint;
     } catch (e) {
+        return false;
+    }
+}
+
+function ebSetSequenceInOutToFullRange(sequence) {
+    if (!sequence || !sequence.setInPoint || !sequence.setOutPoint) {
+        return false;
+    }
+
+    try {
+        var endTicks = String(sequence.end || "");
+        if (!endTicks || isNaN(parseFloat(endTicks)) || parseFloat(endTicks) <= 0) {
+            return false;
+        }
+
+        var endTime = new Time();
+        endTime.ticks = endTicks;
+        sequence.setInPoint(0);
+        sequence.setOutPoint(endTime);
+        return ebSequenceHasInOut(sequence);
+    } catch (error) {
         return false;
     }
 }
@@ -2559,6 +2580,26 @@ exportBackup.getExportSelectionInfo = function () {
     }
 };
 
+exportBackup.setActiveSequenceInOutToFullRange = function () {
+    try {
+        var sequence = ebGetActiveSequence();
+        if (!sequence) {
+            return ebResult(false, "No active sequence is open in Premiere Pro.");
+        }
+
+        if (!ebSetSequenceInOutToFullRange(sequence)) {
+            return ebResult(false, "Could not set In and Out to the full sequence range.");
+        }
+
+        return ebResult(true, "Sequence In and Out were set to the full sequence range.", {
+            inPoint: parseFloat(sequence.getInPoint()) || 0,
+            outPoint: parseFloat(sequence.getOutPoint()) || 0
+        });
+    } catch (e) {
+        return ebResult(false, e.toString());
+    }
+};
+
 exportBackup.validateBackupExportSettings = function (backupVideoTrackNumber, folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, audioFormat, selectedItemsJson, allowExistingFiles, autoEmptyTrack) {
     try {
         var sequence = ebGetActiveSequence();
@@ -2569,6 +2610,11 @@ exportBackup.validateBackupExportSettings = function (backupVideoTrackNumber, fo
         var names;
         if (!sequence) {
             return ebResult(false, "No active sequence is open in Premiere Pro.");
+        }
+        if (!ebSequenceHasInOut(sequence)) {
+            return ebResult(false, "Sequence In and Out points are not set.", {
+                needsInOut: true
+            });
         }
 
         var sequenceBaseName = ebGetSequenceExportBaseName(sequence);
@@ -2719,7 +2765,9 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
         }
 
         if (!ebSequenceHasInOut(sequence)) {
-            return ebResult(false, "Set sequence In and Out points first, then run ExportBackup again.");
+            return ebResult(false, "Sequence In and Out points are not set.", {
+                needsInOut: true
+            });
         }
 
         var sequenceName = ebGetSequenceExportBaseName(sequence);
@@ -3251,7 +3299,7 @@ exportBackup.alignMappedFiles = function (videoPath, audioJson, backupVideoTrack
             if (!videoItem) {
                 return ebResult(false, "Could not import backup video: " + videoPath);
             }
-            ebSetProjectItemColorLabel(videoItem, EB_BACKUP_VIDEO_BROWN_LABEL_INDEX);
+            ebSetProjectItemColorLabel(videoItem, EB_BACKUP_MEDIA_BROWN_LABEL_INDEX);
 
             var videoWhen = ebCreateTimeFromPlacement(rebackupLayout && rebackupLayout.video ? rebackupLayout.video : null);
             if (sequence.overwriteClip) {
@@ -3283,6 +3331,7 @@ exportBackup.alignMappedFiles = function (videoPath, audioJson, backupVideoTrack
             if (!audioItem) {
                 return ebResult(false, "Could not import audio file: " + audioEntries[i].path);
             }
+            ebSetProjectItemColorLabel(audioItem, EB_BACKUP_MEDIA_BROWN_LABEL_INDEX);
 
             var audioWhen = ebCreateTimeFromPlacement(audioPlacements[i]);
             sequence.audioTracks[targetTrackNumber - 1].overwriteClip(audioItem, audioWhen);

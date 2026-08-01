@@ -584,6 +584,62 @@ button:disabled {
     font-size: 12px;
 }
 
+.dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: rgba(4, 7, 10, 0.78);
+}
+
+.dialog-backdrop.is-hidden {
+    display: none;
+}
+
+.dialog-panel {
+    width: min(440px, 100%);
+    padding: 20px;
+    border: 1px solid rgba(97, 168, 255, 0.38);
+    border-radius: 8px;
+    background: #1b2128;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+
+.dialog-panel h2 {
+    font-size: 18px;
+    color: #dcecff;
+}
+
+.dialog-copy {
+    color: #b9c7d6;
+    font-size: 13px;
+}
+
+.dialog-option {
+    min-height: 42px;
+    padding: 10px 12px;
+    border: 1px solid rgba(97, 168, 255, 0.24);
+    border-radius: 6px;
+    background: rgba(97, 168, 255, 0.08);
+    color: #dcecff;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.dialog-actions button {
+    min-width: 86px;
+    padding: 9px 14px;
+    font-size: 13px;
+}
+
 @media (max-width: 860px) {
     .action-line {
         grid-template-columns: 1fr;
@@ -723,6 +779,21 @@ button:disabled {
             <div class="status-box" id="statusBox">Ready.</div>
         </div>
     </section>
+</div>
+
+<div id="inOutPrompt" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="inOutPromptTitle" tabindex="-1">
+    <div class="dialog-panel stack">
+        <h2 id="inOutPromptTitle">Sequence In and Out are not set</h2>
+        <p class="dialog-copy">Set In at the sequence start and Out at the sequence end, then start the export?</p>
+        <label class="option dialog-option">
+            <input type="checkbox" id="autoSetInOutCheckbox" checked>
+            <span>Automatically set In and Out</span>
+        </label>
+        <div class="dialog-actions">
+            <button id="inOutPromptCancelButton" type="button" class="secondary">Cancel</button>
+            <button id="inOutPromptOkButton" type="button">OK</button>
+        </div>
+    </div>
 </div>
 </body>
 </html>

@@ -273,6 +273,74 @@ test('re-backup respects unchecked backup video and checked audio items', () => 
     assert.deepEqual(result[0].trackNumbers, [2]);
     assert.equal(result[0].finalPath, 'E:\\Existing\\Scene_Track2.mp3');
 });
+
+test('re-backup can export a new MP4 when the old backup video clip is missing', () => {
+    const sequence = {
+        name: 'Scene',
+        videoTracks: makeCollection([makeTrack(0)], 'numTracks'),
+        audioTracks: makeCollection([], 'numTracks')
+    };
+    const { context } = loadHostLogic({
+        project: {
+            activeSequence: sequence,
+            rootItem: { type: 2, children: makeCollection([], 'numItems') },
+            sequences: makeCollection([sequence], 'numSequences'),
+            save() {}
+        }
+    });
+
+    const result = JSON.parse(context.exportBackup.validateBackupExportSettings(
+        1,
+        'D:\\Backups',
+        'video.epr',
+        'mp3.epr',
+        'wav.epr',
+        'mp3',
+        JSON.stringify({ includeVideo: true, audioTracks: [], audioGroups: [] }),
+        true,
+        false
+    ));
+
+    assert.equal(result.ok, true);
+    assert.equal(result.backupVideoTrackNumber, 1);
+});
+
+test('empty renamed managed audio tracks do not count as existing backup media', () => {
+    const sequence = {
+        name: 'Scene',
+        audioTracks: makeCollection([
+            makeTrack(0, [{ projectItem: { name: 'Dialogue.wav' } }]),
+            makeTrack(0, [], 'Scene_Track1')
+        ], 'numTracks'),
+        videoTracks: makeCollection([], 'numTracks')
+    };
+    const { context } = loadHostLogic({
+        project: {
+            rootItem: { type: 2, children: makeCollection([], 'numItems') },
+            sequences: makeCollection([sequence], 'numSequences'),
+            save() {}
+        }
+    });
+    context.sequenceUnderTest = sequence;
+
+    const result = JSON.parse(vm.runInContext(`JSON.stringify((() => {
+        const requested = [{
+            kind: 'audio',
+            trackNumber: 1,
+            trackNumbers: [1],
+            path: 'D:\\\\Backups\\\\Scene_Track1.mp3',
+            finalPath: 'D:\\\\Backups\\\\Scene_Track1.mp3'
+        }];
+        return {
+            emptyConflicts: ebFindExistingProjectConflicts(sequenceUnderTest, requested, 'Scene'),
+            managedSelection: ebGetSequenceManagedSelection(sequenceUnderTest, 'Scene')
+        };
+    })())`, context));
+
+    assert.deepEqual(result.emptyConflicts, []);
+    assert.equal(result.managedSelection.trackNumbers['2'], true);
+});
+
 test('video visibility is restored exactly after export-only hiding', () => {
     const { context, source } = loadHostLogic();
     const tracks = [
@@ -445,6 +513,52 @@ test('old backup clips are removed from every project sequence, including offlin
     assert.equal(secondTrack.clips.numItems, 0);
 });
 
+test('media-path cleanup can target only video or only audio tracks', () => {
+    const targetPath = 'D:\\Backups\\Show_BACKUP.mp4';
+    const videoClip = {
+        projectItem: {
+            name: 'Show_BACKUP.mp4',
+            getMediaPath() {
+                return targetPath;
+            }
+        }
+    };
+    const audioClip = {
+        projectItem: {
+            name: 'Show_BACKUP.mp4',
+            getMediaPath() {
+                return targetPath;
+            }
+        }
+    };
+    const videoTrack = makeTrack(0, [videoClip]);
+    const audioTrack = makeTrack(0, [audioClip]);
+
+    videoClip.remove = () => videoTrack.clips.removeItem(videoClip);
+    audioClip.remove = () => audioTrack.clips.removeItem(audioClip);
+
+    const sequence = {
+        videoTracks: makeCollection([videoTrack], 'numTracks'),
+        audioTracks: makeCollection([audioTrack], 'numTracks')
+    };
+    const { context } = loadHostLogic({
+        project: {
+            rootItem: { type: 2, children: makeCollection([], 'numItems') },
+            sequences: makeCollection([sequence], 'numSequences'),
+            save() {}
+        }
+    });
+    context.targetPaths = [targetPath];
+
+    const removedVideoOnly = vm.runInContext('ebRemoveProjectClipsByMediaPaths(targetPaths, "video")', context);
+    assert.equal(removedVideoOnly, 1);
+    assert.equal(videoTrack.clips.numItems, 0);
+    assert.equal(audioTrack.clips.numItems, 1);
+
+    const removedAudioOnly = vm.runInContext('ebRemoveProjectClipsByMediaPaths(targetPaths, "audio")', context);
+    assert.equal(removedAudioOnly, 1);
+    assert.equal(audioTrack.clips.numItems, 0);
+});
 test('offline project items must actually leave the project tree before replacement succeeds', () => {
     const targetPath = 'D:\\Backups\\Show_BACKUP.mp4';
     const rootItems = [];
@@ -676,6 +790,54 @@ test('re-backup cleanup releases both TEMP imports and old final-path media befo
     ]);
 });
 
+test('selected re-backup video is released before MP4 export starts', () => {
+    const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
+    const helperStart = hostSource.indexOf('function ebReleaseRebackupVideoBeforeExport');
+    const runStart = hostSource.indexOf('exportBackup.runBackupQueue = function');
+    const releasePosition = hostSource.indexOf('var videoReleaseResult = ebReleaseRebackupVideoBeforeExport(videoRequest)', runStart);
+    const exportPosition = hostSource.indexOf('ebExportSequenceDirect(sequence, videoPath, videoPresetPath, workAreaType)', runStart);
+
+    assert.ok(helperStart >= 0);
+    assert.match(hostSource.slice(helperStart, runStart), /addPath\(videoRequest\.finalPath\)/);
+    assert.match(hostSource.slice(helperStart, runStart), /ebRemoveProjectClipsByMediaPaths\(paths, "video"\)/);
+    assert.match(hostSource.slice(helperStart, runStart), /ebReleaseProjectItemsByMediaPath\(paths\[i\]\)/);
+    assert.ok(releasePosition > runStart);
+    assert.ok(exportPosition > releasePosition);
+});
+test('re-backup cleanup removes only selected re-exported timeline clips', () => {
+    const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
+    const cleanupStart = hostSource.indexOf('exportBackup.prepareRebackupReplacement = function');
+    const cleanupEnd = hostSource.indexOf('function ebGetAudioEntryTrackNumbers', cleanupStart);
+    const cleanupSource = hostSource.slice(cleanupStart, cleanupEnd);
+
+    assert.match(cleanupSource, /ebRemoveProjectClipsByMediaPaths\(\s*ebGetRebackupReleasePathsByKind\(expectedFiles, "video"\),\s*"video"\s*\)/);
+    assert.match(cleanupSource, /ebRemoveProjectClipsByMediaPaths\(\s*ebGetRebackupReleasePathsByKind\(expectedFiles, "audio"\),\s*"audio"\s*\)/);
+    assert.doesNotMatch(cleanupSource, /ebRemoveManagedClipsFromTrack/);
+    assert.doesNotMatch(cleanupSource, /ebRemoveAllManagedClipsFromAllAudioTracks/);
+    assert.doesNotMatch(cleanupSource, /ebFindManagedBackupVideoTrackNumber/);
+});
+
+test('automatic alignment uses only files selected for the current export', () => {
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const scannerStart = mainSource.indexOf('function scanExportFolderForSequence');
+    const scannerEnd = mainSource.indexOf('function writeExportManifest', scannerStart);
+    const scannerSource = mainSource.slice(scannerStart, scannerEnd);
+    const recoveryStart = mainSource.indexOf('function collectRebackupRecoveryEntries');
+    const recoveryEnd = mainSource.indexOf('async function ensureRebackupTempFilesAreStable', recoveryStart);
+    const recoverySource = mainSource.slice(recoveryStart, recoveryEnd);
+    const automaticAlignmentCount = (mainSource.match(/manifestOnly: true/g) || []).length;
+
+    assert.match(scannerSource, /const manifestOnly = settings\.manifestOnly === true && !!manifest/);
+    assert.match(scannerSource, /if \(!manifestOnly\) \{\s*files\.forEach/);
+    assert.match(recoverySource, /const manifestOnly = settings\.manifestOnly === true && !!manifest/);
+    assert.match(recoverySource, /if \(!manifestOnly\) \{\s*fs\.readdirSync/);
+    assert.equal(automaticAlignmentCount, 2);
+    assert.match(
+        mainSource,
+        /async function alignExistingFolder\(\)[\s\S]*?runAlignmentFlow\(exportFolder \|\| alignFolder, \{\s*skipVideo: false,\s*autoTriggered: false/
+    );
+});
+
 test('filesystem rename is guarded by successful Premiere cleanup', () => {
     const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
 
@@ -693,9 +855,45 @@ test('filesystem rename is guarded by successful Premiere cleanup', () => {
     );
 });
 
+test('Premiere cleanup saves and settles before local re-backup replacement', () => {
+    const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
+    const cleanupStart = hostSource.indexOf('exportBackup.prepareRebackupReplacement = function');
+    const settlePosition = hostSource.indexOf('var projectSavedForRelease = ebSettleMediaReleaseAfterCleanup()', cleanupStart);
+    const verifyPosition = hostSource.indexOf('if (ebGetOnlineProjectItemCountByMediaPath', cleanupStart);
+
+    assert.match(hostSource, /function ebSaveProjectForMediaRelease\(\)[\s\S]*app\.project\.save\(\)/);
+    assert.match(hostSource, /function ebSettleMediaReleaseAfterCleanup\(\)[\s\S]*EB_MEDIA_RELEASE_SAVE_WAIT_MS[\s\S]*ebRemoveUnusedMedia\(\)[\s\S]*EB_MEDIA_RELEASE_WAIT_MS/);
+    assert.ok(settlePosition > cleanupStart);
+    assert.ok(verifyPosition > settlePosition);
+    assert.match(hostSource, /projectSavedForRelease: projectSavedForRelease/);
+});
+
+test('backup MP4 project item is labeled brown after import', () => {
+    let appliedLabel = -1;
+    const { context } = loadHostLogic();
+    context.videoItemUnderTest = {
+        setColorLabel(labelIndex) {
+            appliedLabel = labelIndex;
+            return 0;
+        }
+    };
+
+    const result = vm.runInContext(
+        'ebSetProjectItemColorLabel(videoItemUnderTest, EB_BACKUP_VIDEO_BROWN_LABEL_INDEX)',
+        context
+    );
+    const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
+    const alignStart = hostSource.indexOf('exportBackup.alignMappedFiles = function');
+    const alignEnd = hostSource.indexOf('return ebResult(true', alignStart);
+    const alignSource = hostSource.slice(alignStart, alignEnd);
+
+    assert.equal(result, true);
+    assert.equal(appliedLabel, 14);
+    assert.match(alignSource, /ebSetProjectItemColorLabel\(videoItem, EB_BACKUP_VIDEO_BROWN_LABEL_INDEX\)/);
+});
+
 test('Premiere project is saved only once after import and alignment', () => {
     const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
-    const saveCalls = hostSource.match(/app\.project\.save\(\)/g) || [];
     const alignStart = hostSource.indexOf('exportBackup.alignMappedFiles = function');
     const savePosition = hostSource.indexOf('app.project.save()', alignStart);
     const importPosition = hostSource.indexOf('var videoItem = ebImportProjectItem', alignStart);
@@ -704,19 +902,29 @@ test('Premiere project is saved only once after import and alignment', () => {
         alignStart
     );
 
-    assert.equal(saveCalls.length, 1);
     assert.ok(savePosition > importPosition);
     assert.ok(savePosition > audioPolicyPosition);
 });
-test('successful backup and re-backup use green status text instead of plain Done alerts', () => {
+
+test('completion and import recovery messages use compact status text and visible dialogs', () => {
     const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const alignmentStart = mainSource.indexOf('async function runAlignmentFlow');
+    const alignmentEnd = mainSource.indexOf('function scheduleExportMonitorTick', alignmentStart);
+    const alignmentSource = mainSource.slice(alignmentStart, alignmentEnd);
 
-    assert.match(html, /\.status-box\.is-success/);
+    assert.match(html, /\.status-box\.is-success[\s\S]*font-size: 14px/);
+    assert.match(html, /\.status-box\.is-error[\s\S]*font-size: 17px/);
     assert.match(mainSource, /Backup done without error\./);
     assert.match(mainSource, /Re-backup done without error\./);
+    assert.match(mainSource, /return "ALIGNMENT DONE"/);
+    assert.match(mainSource, /Please use Align Existing to import the file\./);
+    assert.match(mainSource, /setStatus\(lines\.join\("\\n"\), "error"\)/);
     assert.match(mainSource, /setStatus\(lines\.join\("\\n"\), "success"\)/);
-    assert.doesNotMatch(mainSource, /showBlockingMessage\(settings\.autoTriggered \? "Automatic import and alignment finished\." : "Done\."\)/);
+    assert.match(mainSource, /function showResultPrompt\([\s\S]*showBlockingMessage\(lines\.join\("\\n\\n"\)\)/);
+    assert.match(mainSource, /showResultPrompt\("IMPORT NOT COMPLETED", ALIGNMENT_RECOVERY_TEXT\)/);
+    assert.match(alignmentSource, /showResultPrompt\(\s*successTitle,/);
+    assert.doesNotMatch(mainSource, /function showDesktopResultWindow\(/);
 });
 
 test('normal backup reports existing backup media before empty-track errors', () => {
@@ -728,6 +936,7 @@ test('normal backup reports existing backup media before empty-track errors', ()
     assert.notEqual(emptyTrackIndex, -1);
     assert.ok(existingMessageIndex < emptyTrackIndex);
 });
+
 test('automatic empty backup track option is visible and unchecked by default', () => {
     const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
@@ -758,7 +967,37 @@ test('Align Existing prefers selected audio format and cleans opposite-format re
     assert.match(mainSource, /normalizeAudioEntries\(audio, sanitizedBase, preferredAudioFormat\)/);
     assert.match(mainSource, /getAudioEntryFormat\(normalizedEntry\.path\) === preferredFormat/);
     assert.match(mainSource, /oldFinalPath: getOppositeAudioFormatPath\(finalPath\)/);
-    assert.match(mainSource, /fs\.unlinkSync\(entry\.oldFinalPath\)/);
+    assert.match(mainSource, /await removeFileIfExists\(entry\.oldFinalPath, "old-format backup file"\)/);
+});
+
+test('re-backup replacement retries direct delete before local rename', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+
+    assert.doesNotMatch(html, /id="progressDialog"/);
+    assert.match(mainSource, /async function runLocalFileStepWithRetry/);
+    assert.match(mainSource, /for \(let attempt = 1; attempt <= 2; attempt \+= 1\)/);
+    assert.match(mainSource, /const retryDelays = \[10000\]/);
+    assert.match(mainSource, /Retrying \$\{title\} in \$\{waitSeconds\} seconds/);
+    assert.match(mainSource, /Retry \$\{attempt - 1\}\/1/);
+    assert.match(mainSource, /File is still busy\. Retrying delete in \$\{waitSeconds\} seconds/);
+    assert.match(mainSource, /Deleting \$\{label\}/);
+    assert.match(mainSource, /fs\.rmSync\(filePath, \{ force: true, maxRetries: 1, retryDelay: 100 \}\)/);
+    assert.match(mainSource, /deleteLocalFileWithWindowsShell\(filePath\)/);
+    assert.match(mainSource, /deleteLocalFileWithCmd\(filePath\)/);
+    assert.match(mainSource, /function deleteLocalFileWithExplorer\(filePath\)/);
+    assert.match(mainSource, /await tryExplorerDelete\(filePath, label\)/);
+    assert.match(mainSource, /Old file deleted with Windows Explorer/);
+    assert.match(mainSource, /function buildDeletePendingPath\(filePath\)/);
+    assert.match(mainSource, /_DELETE_PENDING_/);
+    assert.match(mainSource, /fs\.renameSync\(filePath, pendingPath\)/);
+    assert.match(mainSource, /await moveFileAsideIfNeeded\(filePath, label\)/);
+    assert.match(mainSource, /Old file moved aside/);
+    assert.doesNotMatch(mainSource, /confirm\(/);
+    assert.doesNotMatch(mainSource, /_cleanup/);
+    assert.doesNotMatch(mainSource, /showLockedFileRecoveryMessage/);
+    assert.doesNotMatch(mainSource, /deleteLocalFileWithElevatedShell/);
+    assert.match(mainSource, /File still busy\\n\\nPress Align Existing button to delete and import re-export\./);
 });
 
 test('Align Existing removes sequence-managed backup clips before target-track emptiness check', () => {
@@ -770,6 +1009,7 @@ test('Align Existing removes sequence-managed backup clips before target-track e
         /ebRemoveManagedClipsFromTrack\(sequence\.videoTracks\[resolvedBackupTrack - 1\], sequenceBaseName, "backup", 0\);[\s\S]*if \(videoPath && ebTrackHasClips\(sequence\.videoTracks\[resolvedBackupTrack - 1\]\)\)/
     );
 });
+
 test('automatic backup track selection picks the lowest empty video track', () => {
     const { context } = loadHostLogic();
     const sequence = {

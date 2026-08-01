@@ -1,5 +1,5 @@
 {
-  "version": "4.0.0",
+  "version": "4.1.0",
   "channel": "main",
-  "notes": "Release 4.0.0 makes Re-backup respect checked queue items, improves Align Existing re-alignment and audio-format cleanup, adds selected-format MP3/WAV replacement, and refreshes the backup UI controls."
+  "notes": "Release 4.1.0 fixes selected-only Backup and Re-backup replacement, prevents automatic alignment from touching unchecked audio, strengthens delayed file cleanup and Align Existing recovery, adds visible completion and error dialogs, and labels imported backup MP4 media Brown."
 }

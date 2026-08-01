@@ -47,7 +47,7 @@ function makeTrack(initialMute, clips, name) {
     };
 }
 
-function loadHostLogic(appOverrides) {
+function loadHostLogic(appOverrides, contextOverrides) {
     const sourcePath = path.join(__dirname, '..', 'jsx', 'export.jsx');
     const source = fs.readFileSync(sourcePath, 'utf8');
     const app = Object.assign({
@@ -64,7 +64,7 @@ function loadHostLogic(appOverrides) {
             save() {}
         }
     }, appOverrides || {});
-    const context = vm.createContext({
+    const contextValues = {
         app,
         console,
         File: function File(filePath) {
@@ -85,7 +85,8 @@ function loadHostLogic(appOverrides) {
         $: {
             sleep() {}
         }
-    });
+    };
+    const context = vm.createContext(Object.assign(contextValues, contextOverrides || {}));
 
     vm.runInContext(source, context, { filename: sourcePath });
     return { context, source };
@@ -200,6 +201,152 @@ test('re-backup output paths follow existing backup media paths', () => {
     assert.equal(result[1].path, 'E:\\Existing\\Scene_Track1_REBKP_TEMP.mp3');
 });
 
+test('Re-backup preserves and relinks old media before freeing the final filename', () => {
+    const sourcePath = path.win32.join('D:', 'Backups', 'Scene_BACKUP.mp4');
+    const files = new Set([sourcePath]);
+    let mediaPath = sourcePath;
+    let saveCount = 0;
+    let blockedCopyTarget = '';
+
+    function normalizeFilePath(filePath) {
+        return path.win32.normalize(String(filePath || ''));
+    }
+
+    class MockFile {
+        constructor(filePath) {
+            this.fsName = normalizeFilePath(filePath);
+            this.name = path.win32.basename(this.fsName);
+        }
+
+        get exists() {
+            return files.has(this.fsName);
+        }
+
+        copy(targetPath) {
+            if (!files.has(this.fsName)) {
+                return false;
+            }
+            const normalizedTargetPath = normalizeFilePath(targetPath);
+            if (blockedCopyTarget && normalizedTargetPath === blockedCopyTarget) {
+                return false;
+            }
+            files.add(normalizedTargetPath);
+            return true;
+        }
+
+        remove() {
+            return files.delete(this.fsName);
+        }
+
+        rename(newName) {
+            if (!files.has(this.fsName)) {
+                return false;
+            }
+            const renamedPath = path.win32.join(path.win32.dirname(this.fsName), String(newName));
+            files.delete(this.fsName);
+            files.add(renamedPath);
+            this.fsName = renamedPath;
+            this.name = path.win32.basename(renamedPath);
+            return true;
+        }
+    }
+
+    const mediaItem = {
+        type: 1,
+        name: path.win32.basename(sourcePath),
+        getMediaPath() {
+            return mediaPath;
+        },
+        canChangeMediaPath() {
+            return true;
+        },
+        changeMediaPath(newPath) {
+            mediaPath = normalizeFilePath(newPath);
+            return 0;
+        }
+    };
+    const rootItem = {
+        type: 2,
+        children: makeCollection([mediaItem], 'numItems')
+    };
+    const { context } = loadHostLogic({
+        project: {
+            rootItem,
+            sequences: makeCollection([], 'numSequences'),
+            save() {
+                saveCount += 1;
+            }
+        }
+    }, {
+        File: MockFile
+    });
+    const requestedFiles = [{
+        kind: 'video',
+        path: path.win32.join('D:', 'Backups', 'Scene_BACKUP_REBKP_TEMP.mp4'),
+        finalPath: sourcePath,
+        sourceMediaPath: sourcePath,
+        trackNumber: 0,
+        trackNumbers: []
+    }];
+    context.requestedFilesUnderTest = requestedFiles;
+
+    const result = JSON.parse(vm.runInContext(
+        'JSON.stringify(ebPrepareRebackupMediaForDirectExport(requestedFilesUnderTest))',
+        context
+    ));
+    const releasePaths = JSON.parse(vm.runInContext(
+        'JSON.stringify(ebGetRebackupReleasePaths(requestedFilesUnderTest))',
+        context
+    ));
+    const preservedPath = requestedFiles[0].preservedPaths[0];
+    context.preservedClipUnderTest = {
+        projectItem: {
+            getMediaPath() {
+                return preservedPath;
+            }
+        }
+    };
+    const recoveredFinalPath = vm.runInContext(
+        'ebGetManagedClipFinalMediaPath(preservedClipUnderTest)',
+        context
+    );
+
+    assert.equal(result.preservedCount, 1);
+    assert.equal(requestedFiles[0].path, sourcePath);
+    assert.equal(files.has(sourcePath), false);
+    assert.equal(files.has(preservedPath), true);
+    assert.equal(mediaPath, preservedPath);
+    assert.equal(recoveredFinalPath, sourcePath);
+    assert.equal(mediaItem.name, path.win32.basename(sourcePath));
+    assert.equal(saveCount, 1);
+    assert.ok(releasePaths.includes(sourcePath));
+    assert.ok(releasePaths.includes(preservedPath));
+
+    blockedCopyTarget = sourcePath;
+    context.failedRollbackUnderTest = [{
+        sourcePath,
+        preservedPath,
+        extraPaths: []
+    }];
+    vm.runInContext('ebRestoreRebackupPreservations(failedRollbackUnderTest)', context);
+    assert.equal(files.has(sourcePath), false);
+    assert.equal(files.has(preservedPath), true);
+    assert.equal(mediaPath, preservedPath);
+});
+test('preserved filenames remain recognizable after an interrupted Re-backup', () => {
+    const { context } = loadHostLogic();
+    context.preservedVideoName = 'Scene_BACKUP_REBKP_OLD_1785000000000_1.mp4';
+    context.preservedAudioName = 'Scene_Track1-2_REBKP_OLD_1785000000000_2.wav';
+
+    assert.equal(vm.runInContext(
+        'ebIsSequenceManagedBackupTrack(preservedVideoName, "Scene")',
+        context
+    ), true);
+    assert.deepEqual(JSON.parse(vm.runInContext(
+        'JSON.stringify(ebGetSequenceManagedAudioTrackNumbers(preservedAudioName, "Scene"))',
+        context
+    )), [1, 2]);
+});
 test('re-backup audio format changes render selected format and release old audio path', () => {
     const sequence = {
         name: 'Scene',
@@ -849,19 +996,60 @@ test('re-backup cleanup releases both TEMP imports and old final-path media befo
     ]);
 });
 
-test('selected re-backup video is released before MP4 export starts', () => {
+test('selected re-backup video stays visible in the sequence until MP4 export finishes', () => {
     const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
-    const helperStart = hostSource.indexOf('function ebReleaseRebackupVideoBeforeExport');
     const runStart = hostSource.indexOf('exportBackup.runBackupQueue = function');
-    const releasePosition = hostSource.indexOf('var videoReleaseResult = ebReleaseRebackupVideoBeforeExport(videoRequest)', runStart);
-    const exportPosition = hostSource.indexOf('ebExportSequenceDirect(sequence, videoPath, videoPresetPath, workAreaType)', runStart);
+    const runEnd = hostSource.indexOf('function ebGetRebackupReleasePaths', runStart);
+    const runSource = hostSource.slice(runStart, runEnd);
+    const exportPosition = runSource.indexOf('ebExportSequenceDirect(sequence, videoPath, videoPresetPath, workAreaType)');
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const panelRunStart = mainSource.indexOf('async function runExport');
+    const hostResultPosition = mainSource.indexOf('const result = await callHost(script)', panelRunStart);
+    const cleanupPosition = mainSource.indexOf('await prepareRebackupReplacement(manifest)', hostResultPosition);
 
-    assert.ok(helperStart >= 0);
-    assert.match(hostSource.slice(helperStart, runStart), /addPath\(videoRequest\.finalPath\)/);
-    assert.match(hostSource.slice(helperStart, runStart), /ebRemoveProjectClipsByMediaPaths\(paths, "video"\)/);
-    assert.match(hostSource.slice(helperStart, runStart), /ebReleaseProjectItemsByMediaPath\(paths\[i\]\)/);
-    assert.ok(releasePosition > runStart);
-    assert.ok(exportPosition > releasePosition);
+    assert.doesNotMatch(hostSource, /function ebReleaseRebackupVideoBeforeExport/);
+    assert.doesNotMatch(runSource, /ebRemoveProjectClipsByMediaPaths|ebReleaseProjectItemsByMediaPath/);
+    assert.doesNotMatch(runSource, /existingBackupVideoTrack\.setMute\(1\)/);
+    assert.ok(exportPosition >= 0);
+    assert.ok(cleanupPosition > hostResultPosition);
+});
+test('Media Encoder queue failures keep Re-backup recovery metadata', () => {
+    const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
+    const runStart = hostSource.indexOf('exportBackup.runBackupQueue = function');
+    const runEnd = hostSource.indexOf('function ebGetRebackupReleasePaths', runStart);
+    const runSource = hostSource.slice(runStart, runEnd);
+
+    assert.match(runSource, /throw new Error\("Could not queue the MP4 export in Adobe Media Encoder\."\)/);
+    assert.match(runSource, /if \(shouldRebackup\) \{\s*throw new Error\("Could not queue " \+ audioLabel/);
+    assert.match(runSource, /if \(rebackupPreservationPrepared && requestedFiles && requestedFiles\.length\)/);
+    assert.match(runSource, /recoveryQueuedFiles\.push\(ebBuildQueuedFileFromRequested\(requestedFiles\[recoveryIndex\]\)\)/);
+});
+test('preserved old files are cleaned only after completed final-name exports', () => {
+    const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
+    const runStart = hostSource.indexOf('exportBackup.runBackupQueue = function');
+    const runEnd = hostSource.indexOf('function ebGetRebackupReleasePaths', runStart);
+    const runSource = hostSource.slice(runStart, runEnd);
+    const preparePosition = runSource.indexOf('ebPrepareRebackupMediaForDirectExport(requestedFiles)');
+    const directPathPosition = hostSource.indexOf('requested.path = ebToFsPath(requested.finalPath)');
+    const exportPosition = runSource.indexOf('ebExportSequenceDirect(sequence, videoPath, videoPresetPath, workAreaType)');
+
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const directCleanupStart = mainSource.indexOf('if (manifest.rebackup && parsed.exportMode === EXPORT_MODE_PREMIERE)');
+    const readyPosition = mainSource.indexOf('assertExpectedExportsAreReady(manifest)', directCleanupStart);
+    const premiereCleanupPosition = mainSource.indexOf('await prepareRebackupReplacement(manifest)', directCleanupStart);
+    const finalizeStart = mainSource.indexOf('async function finalizeRebackupFiles');
+    const finalizeEnd = mainSource.indexOf('function replacePathExtension', finalizeStart);
+    const finalizeSource = mainSource.slice(finalizeStart, finalizeEnd);
+
+    assert.ok(preparePosition >= 0);
+    assert.ok(directPathPosition >= 0);
+    assert.ok(exportPosition > preparePosition);
+    assert.ok(readyPosition > directCleanupStart);
+    assert.ok(premiereCleanupPosition > readyPosition);
+    assert.match(finalizeSource, /getManifestPreservedPaths/);
+    assert.ok(finalizeSource.includes('removeFileIfExists(preservedPaths[i], "preserved old backup file")'));
+    assert.ok(mainSource.includes("lowerName.includes(REBACKUP_OLD_MARKER.toLowerCase())"));
+    assert.match(mainSource, /New Re-backup export files are not complete yet/);
 });
 test('re-backup cleanup removes only selected re-exported timeline clips', () => {
     const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
@@ -927,28 +1115,31 @@ test('Premiere cleanup saves and settles before local re-backup replacement', ()
     assert.match(hostSource, /projectSavedForRelease: projectSavedForRelease/);
 });
 
-test('all imported backup video and audio media are labeled brown', () => {
-    let appliedLabel = -1;
+test('imported backup video is orange while backup audio remains brown', () => {
+    const appliedLabels = [];
     const { context } = loadHostLogic();
     context.mediaItemUnderTest = {
         setColorLabel(labelIndex) {
-            appliedLabel = labelIndex;
+            appliedLabels.push(labelIndex);
             return 0;
         }
     };
 
-    const result = vm.runInContext(
-        'ebSetProjectItemColorLabel(mediaItemUnderTest, EB_BACKUP_MEDIA_BROWN_LABEL_INDEX)',
+    const results = JSON.parse(vm.runInContext(
+        'JSON.stringify([' +
+            'ebSetProjectItemColorLabel(mediaItemUnderTest, EB_BACKUP_VIDEO_ORANGE_LABEL_INDEX),' +
+            'ebSetProjectItemColorLabel(mediaItemUnderTest, EB_BACKUP_MEDIA_BROWN_LABEL_INDEX)' +
+        '])',
         context
-    );
+    ));
     const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
     const alignStart = hostSource.indexOf('exportBackup.alignMappedFiles = function');
     const alignEnd = hostSource.indexOf('return ebResult(true', alignStart);
     const alignSource = hostSource.slice(alignStart, alignEnd);
 
-    assert.equal(result, true);
-    assert.equal(appliedLabel, 14);
-    assert.match(alignSource, /ebSetProjectItemColorLabel\(videoItem, EB_BACKUP_MEDIA_BROWN_LABEL_INDEX\)/);
+    assert.deepEqual(results, [true, true]);
+    assert.deepEqual(appliedLabels, [7, 14]);
+    assert.match(alignSource, /ebSetProjectItemColorLabel\(videoItem, EB_BACKUP_VIDEO_ORANGE_LABEL_INDEX\)/);
     assert.match(alignSource, /ebSetProjectItemColorLabel\(audioItem, EB_BACKUP_MEDIA_BROWN_LABEL_INDEX\)/);
 });
 

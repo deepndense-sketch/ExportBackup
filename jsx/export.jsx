@@ -98,6 +98,7 @@ var EB_ENCODER_LAUNCH_WAIT_MS = 20000;
 var EB_ENCODER_QUEUE_SETTLE_WAIT_MS = 10000;
 var EB_MEDIA_RELEASE_WAIT_MS = 2500;
 var EB_MEDIA_RELEASE_SAVE_WAIT_MS = 1500;
+var EB_BACKUP_VIDEO_ORANGE_LABEL_INDEX = 7;
 var EB_BACKUP_MEDIA_BROWN_LABEL_INDEX = 14;
 
 function ebEscape(value) {
@@ -301,7 +302,7 @@ function ebStripExtension(value) {
 }
 
 function ebNormalizeManagedName(value) {
-    return ebNormalizeName(ebStripExtension(value));
+    return ebNormalizeName(ebStripExtension(value)).replace(/_rebkp_old_\d+_\d+$/, "");
 }
 
 function ebGetManagedAudioTrackRole(trackName, baseName) {
@@ -845,7 +846,8 @@ function ebCaptureRebackupLayout(sequence, baseName) {
                 if (ebIsSequenceManagedBackupTrack(ebGetClipDisplayName(videoTrack.clips[j]), baseName) || ebIsSequenceManagedBackupTrack(ebGetTrackName(videoTrack), baseName)) {
                     layout.video = ebAddClipStartInfo({
                         targetTrackNumber: i + 1,
-                        mediaPath: ebGetManagedClipFinalMediaPath(videoTrack.clips[j])
+                        mediaPath: ebGetManagedClipFinalMediaPath(videoTrack.clips[j]),
+                        currentMediaPath: ebGetClipMediaPath(videoTrack.clips[j])
                     }, videoTrack.clips[j]);
                     break;
                 }
@@ -867,7 +869,8 @@ function ebCaptureRebackupLayout(sequence, baseName) {
                 if (!layout.backupAudio && (ebIsSequenceManagedBackupTrack(clipName, baseName) || ebIsSequenceManagedBackupTrack(ebGetTrackName(audioTrack), baseName))) {
                     layout.backupAudio = ebAddClipStartInfo({
                         targetTrackNumber: i + 1,
-                        mediaPath: ebGetManagedClipFinalMediaPath(audioClip)
+                        mediaPath: ebGetManagedClipFinalMediaPath(audioClip),
+                        currentMediaPath: ebGetClipMediaPath(audioClip)
                     }, audioClip);
                 }
 
@@ -880,7 +883,8 @@ function ebCaptureRebackupLayout(sequence, baseName) {
                             sourceTrackNumber: sourceTrackNumbers[0],
                             sourceTrackNumbers: sourceTrackNumbers,
                             targetTrackNumber: i + 1,
-                            mediaPath: ebGetManagedClipFinalMediaPath(audioClip)
+                            mediaPath: ebGetManagedClipFinalMediaPath(audioClip),
+                            currentMediaPath: ebGetClipMediaPath(audioClip)
                         }, audioClip));
                     }
                 }
@@ -953,7 +957,8 @@ function ebGetRebackupAudioDefinitions(sequence, baseName, rebackupLayout) {
             definitions.push({
                 trackNumber: validTrackNumbers[0],
                 trackNumbers: validTrackNumbers,
-                mediaPath: existingOutputs[i].mediaPath || ""
+                mediaPath: existingOutputs[i].mediaPath || "",
+                currentMediaPath: existingOutputs[i].currentMediaPath || existingOutputs[i].mediaPath || ""
             });
         }
     }
@@ -1675,6 +1680,25 @@ function ebStripRebackupTempMarkerFromPath(mediaPath) {
     return fsPath.substring(0, markerIndex) + fsPath.substring(dotIndex);
 }
 
+function ebStripRebackupPreservedMarkerFromPath(mediaPath) {
+    var fsPath = ebToFsPath(mediaPath);
+    var dotIndex = fsPath.lastIndexOf(".");
+    var slashIndex = Math.max(fsPath.lastIndexOf("\\"), fsPath.lastIndexOf("/"));
+    var marker = "_REBKP_OLD_";
+    var markerIndex;
+
+    if (dotIndex <= slashIndex) {
+        dotIndex = fsPath.length;
+    }
+
+    markerIndex = fsPath.toUpperCase().lastIndexOf(marker, dotIndex);
+    if (markerIndex <= slashIndex) {
+        return fsPath;
+    }
+
+    return fsPath.substring(0, markerIndex) + fsPath.substring(dotIndex);
+}
+
 function ebReplacePathExtension(filePath, extension) {
     var fsPath = ebToFsPath(filePath);
     var dotIndex = fsPath.lastIndexOf(".");
@@ -1712,7 +1736,9 @@ function ebBuildRebackupTempPathFromFinalPath(finalPath) {
 }
 
 function ebGetManagedClipFinalMediaPath(clip) {
-    return ebStripRebackupTempMarkerFromPath(ebGetClipMediaPath(clip));
+    return ebStripRebackupPreservedMarkerFromPath(
+        ebStripRebackupTempMarkerFromPath(ebGetClipMediaPath(clip))
+    );
 }
 
 function ebRemoveProjectClipsByMediaPaths(mediaPaths, trackKind) {
@@ -2226,7 +2252,10 @@ function ebBuildRequestedOutputFiles(sequence, folderPath, videoPresetPath, audi
             path: isRebackup && existingVideoFinalPath
                 ? ebBuildRebackupTempPathFromFinalPath(resolvedVideoFinalPath)
                 : ebBuildOutputPath(folderPath, sequenceName, "_BACKUP", videoExtension, isRebackup),
-            finalPath: resolvedVideoFinalPath
+            finalPath: resolvedVideoFinalPath,
+            sourceMediaPath: isRebackup && rebackupLayout && rebackupLayout.video
+                ? (rebackupLayout.video.currentMediaPath || existingVideoFinalPath)
+                : ""
         });
     }
 
@@ -2254,7 +2283,8 @@ function ebBuildRequestedOutputFiles(sequence, folderPath, videoPresetPath, audi
                 trackNumbers: rebackupTrackNumbers,
                 path: ebBuildRebackupTempPathFromFinalPath(resolvedAudioFinalPath),
                 finalPath: resolvedAudioFinalPath,
-                oldFinalPath: oldAudioFinalPath
+                oldFinalPath: oldAudioFinalPath,
+                sourceMediaPath: rebackupAudioDefinitions[i].currentMediaPath || existingAudioFinalPath
             });
         }
 
@@ -2398,6 +2428,10 @@ function ebBuildQueuedFileFromRequested(requested) {
         kind: requested.kind,
         path: ebToFsPath(requested.path),
         finalPath: ebToFsPath(requested.finalPath || requested.path),
+        oldFinalPath: requested.oldFinalPath ? ebToFsPath(requested.oldFinalPath) : "",
+        sourceMediaPath: requested.sourceMediaPath ? ebToFsPath(requested.sourceMediaPath) : "",
+        sourcePaths: requested.sourcePaths || [],
+        preservedPaths: requested.preservedPaths || [],
         trackNumber: requested.trackNumber || 0,
         trackNumbers: requested.trackNumbers || [],
         name: new File(ebToFsPath(requested.path)).name
@@ -2694,65 +2728,252 @@ exportBackup.getAlignmentDefaults = function () {
     }
 };
 
-function ebReleaseRebackupVideoBeforeExport(videoRequest) {
-    var paths = [];
-    var seen = {};
-    var removedTimelineClips = 0;
-    var removedProjectItems = 0;
-    var offlinedProjectItems = 0;
+function ebBuildRebackupPreservedPath(mediaPath, index) {
+    var fsPath = ebToFsPath(mediaPath);
+    var dotIndex = fsPath.lastIndexOf(".");
+    var slashIndex = Math.max(fsPath.lastIndexOf("\\"), fsPath.lastIndexOf("/"));
+    var extension = "";
+    var basePath = fsPath;
+    var stamp = (new Date()).getTime();
+    var suffixIndex = Math.max(1, parseInt(index, 10) || 1);
+    var candidate;
+
+    if (dotIndex > slashIndex) {
+        extension = fsPath.substring(dotIndex);
+        basePath = fsPath.substring(0, dotIndex);
+    }
+
+    candidate = basePath + "_REBKP_OLD_" + stamp + "_" + suffixIndex + extension;
+    while ((new File(candidate)).exists) {
+        suffixIndex += 1;
+        candidate = basePath + "_REBKP_OLD_" + stamp + "_" + suffixIndex + extension;
+    }
+
+    return ebToFsPath(candidate);
+}
+
+function ebRelinkProjectItemsByMediaPath(sourcePath, targetPath) {
+    var sourceFsPath = ebToFsPath(sourcePath);
+    var targetFsPath = ebToFsPath(targetPath);
+    var items = ebCollectProjectItemsByMediaPath(app.project.rootItem, sourceFsPath, []);
+    var changed = 0;
+    var failed = 0;
     var i;
 
-    function addPath(pathValue) {
-        if (!pathValue) {
-            return;
+    for (i = 0; i < items.length; i++) {
+        var item = items[i];
+        var canChange = true;
+        var changeResult;
+        var changedPath = "";
+
+        try {
+            if (item.canChangeMediaPath) {
+                canChange = item.canChangeMediaPath() !== false;
+            }
+        } catch (canChangeError) {
+            canChange = false;
         }
 
-        var fsPath = ebToFsPath(pathValue);
-        var key = ebNormalizeMediaPathForComparison(fsPath);
-        if (key && !seen[key]) {
-            seen[key] = true;
-            paths.push(fsPath);
+        if (!canChange || !item.changeMediaPath) {
+            failed += 1;
+            continue;
+        }
+
+        try {
+            changeResult = item.changeMediaPath(targetFsPath, true);
+            changedPath = item.getMediaPath ? ebToFsPath(item.getMediaPath()) : "";
+            if (
+                (changeResult === 0 || changeResult === true || changeResult === undefined) &&
+                ebNormalizeMediaPathForComparison(changedPath) === ebNormalizeMediaPathForComparison(targetFsPath)
+            ) {
+                try {
+                    item.name = (new File(ebStripRebackupPreservedMarkerFromPath(targetFsPath))).name;
+                } catch (nameError) {}
+                changed += 1;
+            } else {
+                failed += 1;
+            }
+        } catch (changeError) {
+            failed += 1;
         }
     }
-
-    if (!videoRequest || videoRequest.kind !== "video") {
-        return {
-            paths: paths,
-            removedTimelineClips: 0,
-            removedProjectItems: 0,
-            offlinedProjectItems: 0,
-            projectSavedForRelease: false
-        };
-    }
-
-    addPath(videoRequest.finalPath);
-    addPath(videoRequest.oldFinalPath);
-
-    removedTimelineClips += ebRemoveProjectClipsByMediaPaths(paths, "video");
-    for (i = 0; i < paths.length; i++) {
-        var releaseResult = ebReleaseProjectItemsByMediaPath(paths[i]);
-        removedProjectItems += releaseResult.removed;
-        offlinedProjectItems += releaseResult.offlined;
-    }
-
-    try {
-        ebRemoveUnusedMedia();
-    } catch (cleanupError) {}
 
     return {
-        paths: paths,
-        removedTimelineClips: removedTimelineClips,
-        removedProjectItems: removedProjectItems,
-        offlinedProjectItems: offlinedProjectItems,
-        projectSavedForRelease: ebSettleMediaReleaseAfterCleanup()
+        sourcePath: sourceFsPath,
+        targetPath: targetFsPath,
+        found: items.length,
+        changed: changed,
+        failed: failed
     };
 }
 
+function ebRestoreRebackupPreservations(preservations) {
+    var entries = preservations || [];
+    var i;
+
+    for (i = entries.length - 1; i >= 0; i--) {
+        var entry = entries[i];
+        var sourceFile = new File(entry.sourcePath);
+        var preservedFile = new File(entry.preservedPath);
+        var relinkResult = null;
+
+        try {
+            if (!sourceFile.exists && preservedFile.exists) {
+                preservedFile.copy(sourceFile.fsName);
+            }
+        } catch (copyError) {}
+
+        try {
+            if (sourceFile.exists) {
+                relinkResult = ebRelinkProjectItemsByMediaPath(entry.preservedPath, entry.sourcePath);
+            }
+        } catch (relinkError) {}
+
+        entry.rollbackRestored = sourceFile.exists && !!relinkResult &&
+            relinkResult.failed === 0 && relinkResult.changed === relinkResult.found;
+    }
+
+    ebSaveProjectForMediaRelease();
+    $.sleep(EB_MEDIA_RELEASE_SAVE_WAIT_MS);
+
+    for (i = 0; i < entries.length; i++) {
+        if (!entries[i].rollbackRestored) {
+            continue;
+        }
+
+        try {
+            var rollbackFile = new File(entries[i].preservedPath);
+            if (rollbackFile.exists) {
+                rollbackFile.remove();
+            }
+
+            var extraPaths = entries[i].extraPaths || [];
+            for (var extraIndex = 0; extraIndex < extraPaths.length; extraIndex++) {
+                var extraFile = new File(extraPaths[extraIndex]);
+                if (extraFile.exists) {
+                    extraFile.remove();
+                }
+            }
+        } catch (removeError) {}
+    }
+}
+
+function ebPrepareRebackupMediaForDirectExport(requestedFiles) {
+    var files = requestedFiles || [];
+    var preservations = [];
+    var seenSourcePaths = {};
+    var preservationIndex = 1;
+    var i;
+
+    try {
+        for (i = 0; i < files.length; i++) {
+            var requested = files[i];
+            var candidates;
+            var candidateIndex;
+
+            if (!requested || !requested.finalPath) {
+                continue;
+            }
+
+            requested.sourcePaths = [];
+            requested.preservedPaths = [];
+            candidates = [
+                requested.sourceMediaPath || "",
+                requested.oldFinalPath || "",
+                requested.finalPath || ""
+            ];
+
+            for (candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+                var sourcePath = ebToFsPath(candidates[candidateIndex]);
+                var sourceKey = ebNormalizeMediaPathForComparison(sourcePath);
+                var sourceFile;
+                var preservedPath;
+                var preservedFile;
+                var relinkResult;
+
+                if (!sourceKey || seenSourcePaths[sourceKey]) {
+                    continue;
+                }
+                seenSourcePaths[sourceKey] = true;
+                sourceFile = new File(sourcePath);
+                if (!sourceFile.exists) {
+                    continue;
+                }
+
+                preservedPath = ebBuildRebackupPreservedPath(sourcePath, preservationIndex);
+                preservationIndex += 1;
+                preservedFile = new File(preservedPath);
+                if (!sourceFile.copy(preservedFile.fsName) || !preservedFile.exists) {
+                    throw new Error("Could not preserve existing backup file: " + sourcePath);
+                }
+
+                preservations.push({
+                    sourcePath: sourcePath,
+                    preservedPath: preservedPath,
+                    requested: requested,
+                    extraPaths: []
+                });
+                requested.sourcePaths.push(sourcePath);
+                requested.preservedPaths.push(preservedPath);
+
+                relinkResult = ebRelinkProjectItemsByMediaPath(sourcePath, preservedPath);
+                if (relinkResult.failed > 0 || relinkResult.changed !== relinkResult.found) {
+                    throw new Error("Premiere could not relink existing backup media: " + sourcePath);
+                }
+            }
+
+            requested.path = ebToFsPath(requested.finalPath);
+        }
+
+        if (!preservations.length) {
+            return {
+                preservedCount: 0,
+                preservations: preservations,
+                projectSavedForRelease: false
+            };
+        }
+
+        var projectSavedForRelease = ebSaveProjectForMediaRelease();
+        $.sleep(EB_MEDIA_RELEASE_SAVE_WAIT_MS + EB_MEDIA_RELEASE_WAIT_MS);
+
+        for (i = 0; i < preservations.length; i++) {
+            var preservation = preservations[i];
+            var originalFile = new File(preservation.sourcePath);
+            if (!originalFile.exists) {
+                continue;
+            }
+
+            if (!originalFile.remove()) {
+                var movedPath = ebBuildRebackupPreservedPath(preservation.sourcePath, preservationIndex);
+                preservationIndex += 1;
+                if (!originalFile.rename((new File(movedPath)).name)) {
+                    throw new Error("Could not free the real backup filename: " + preservation.sourcePath);
+                }
+                preservation.extraPaths.push(movedPath);
+                preservation.requested.preservedPaths.push(movedPath);
+            }
+
+            if ((new File(preservation.sourcePath)).exists) {
+                throw new Error("The real backup filename is still occupied: " + preservation.sourcePath);
+            }
+        }
+
+        return {
+            preservedCount: preservations.length,
+            preservations: preservations,
+            projectSavedForRelease: projectSavedForRelease
+        };
+    } catch (error) {
+        ebRestoreRebackupPreservations(preservations);
+        throw error;
+    }
+}
 exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPath, wavPresetPath, audioFormat, backupVideoTrackNumber, removeSequenceMarkers, selectedItemsJson, exportMode, isRebackup, autoEmptyTrack) {
     var sequence = null;
     var originalMuteStates = [];
     var originalVideoMuteStates = [];
     var audioStateFinalized = false;
+    var rebackupPreservationPrepared = false;
 
     try {
         sequence = ebGetActiveSequence();
@@ -2867,6 +3088,16 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
             });
         }
 
+        if (shouldRebackup) {
+            var preservationResult = ebPrepareRebackupMediaForDirectExport(requestedFiles);
+            rebackupPreservationPrepared = preservationResult.preservedCount > 0;
+            notes.push(
+                preservationResult.preservedCount > 0
+                    ? "Preserved and relinked " + preservationResult.preservedCount + " old backup file(s) before export."
+                    : "No existing local backup files needed preservation before export."
+            );
+        }
+
         if (shouldRemoveSequenceMarkers) {
             var removedMarkerCount = ebRemoveAllSequenceMarkers(sequence);
             notes.push("Removed " + removedMarkerCount + " sequence marker" + (removedMarkerCount === 1 ? "" : "s") + " before export.");
@@ -2899,14 +3130,6 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
             }
 
             var videoPath = videoRequest ? videoRequest.path : "";
-            if (shouldRebackup && videoRequest) {
-                var videoReleaseResult = ebReleaseRebackupVideoBeforeExport(videoRequest);
-                notes.push(
-                    "Released old backup MP4 before re-export: " +
-                    videoReleaseResult.removedTimelineClips + " timeline clip(s), " +
-                    videoReleaseResult.removedProjectItems + " project item(s)."
-                );
-            }
             var hiddenVideoTrackCount = ebHideVideoTracksAbove(sequence, resolvedBackupVideoTrackNumber);
             ebClearAllAudioSoloStates(sequence);
             if (resolvedExportMode === "premiere") {
@@ -2914,8 +3137,7 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
             } else {
                 var videoJobId = ebQueueSequenceWithSettle(sequence, videoPath, videoPresetPath, workAreaType);
                 if (!videoJobId || videoJobId === "0") {
-                    ebRestoreMuteStates(sequence, originalMuteStates);
-                    return ebResult(false, "Could not queue the MP4 export in Adobe Media Encoder.");
+                    throw new Error("Could not queue the MP4 export in Adobe Media Encoder.");
                 }
             }
 
@@ -2964,6 +3186,9 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
                 var audioJobId = ebQueueSequenceWithSettle(sequence, audioPath, audioPresetPath, workAreaType);
 
                 if (!audioJobId || audioJobId === "0") {
+                    if (shouldRebackup) {
+                        throw new Error("Could not queue " + audioLabel + " for Track" + firstTrackNumber + " in Adobe Media Encoder.");
+                    }
                     notes.push("Failed to queue " + audioLabel + " for Track" + firstTrackNumber + ".");
                     continue;
                 }
@@ -2992,13 +3217,33 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
             audioFormat: resolvedAudioFormat,
             exportMode: resolvedExportMode,
             rebackup: shouldRebackup,
+            rebackupPrepared: rebackupPreservationPrepared,
             rebackupLayout: rebackupLayout,
             queuedFiles: queuedFiles,
             projectName: app.project && app.project.name ? app.project.name : "",
             projectPath: app.project && app.project.path ? app.project.path : ""
         });
     } catch (e) {
-        return ebResult(false, e.toString());
+        var recoveryQueuedFiles = [];
+        if (rebackupPreservationPrepared && requestedFiles && requestedFiles.length) {
+            for (var recoveryIndex = 0; recoveryIndex < requestedFiles.length; recoveryIndex++) {
+                recoveryQueuedFiles.push(ebBuildQueuedFileFromRequested(requestedFiles[recoveryIndex]));
+            }
+        }
+
+        return ebResult(false, e.toString(), {
+            sequenceName: sequence ? ebGetSequenceName(sequence) : "",
+            baseName: sequenceName || "",
+            backupVideoTrackNumber: resolvedBackupVideoTrackNumber || 0,
+            audioFormat: resolvedAudioFormat || "",
+            exportMode: resolvedExportMode || "",
+            rebackup: !!shouldRebackup,
+            rebackupPrepared: rebackupPreservationPrepared,
+            rebackupLayout: rebackupLayout || null,
+            queuedFiles: recoveryQueuedFiles,
+            projectName: app.project && app.project.name ? app.project.name : "",
+            projectPath: app.project && app.project.path ? app.project.path : ""
+        });
     } finally {
         // Video layers are hidden only while export jobs are created. Always
         // restore every layer to its exact pre-export state, including layers
@@ -3036,12 +3281,21 @@ function ebGetRebackupReleasePaths(expectedFiles) {
             continue;
         }
 
-        // A render preset may automatically import the TEMP output into
-        // Premiere. Remove that project item before the filesystem rename or it
-        // becomes an offline orphan. The old final-path item must also go.
+        // Remove any automatically imported replacement item and every
+        // preserved old-media item before local cleanup and final alignment.
         addPath(files[i].path);
         addPath(files[i].finalPath);
         addPath(files[i].oldFinalPath);
+        addPath(files[i].sourceMediaPath);
+
+        var sourcePaths = files[i].sourcePaths || [];
+        var preservedPaths = files[i].preservedPaths || [];
+        for (var sourceIndex = 0; sourceIndex < sourcePaths.length; sourceIndex++) {
+            addPath(sourcePaths[sourceIndex]);
+        }
+        for (var preservedIndex = 0; preservedIndex < preservedPaths.length; preservedIndex++) {
+            addPath(preservedPaths[preservedIndex]);
+        }
     }
 
     return releasePaths;
@@ -3299,7 +3553,7 @@ exportBackup.alignMappedFiles = function (videoPath, audioJson, backupVideoTrack
             if (!videoItem) {
                 return ebResult(false, "Could not import backup video: " + videoPath);
             }
-            ebSetProjectItemColorLabel(videoItem, EB_BACKUP_MEDIA_BROWN_LABEL_INDEX);
+            ebSetProjectItemColorLabel(videoItem, EB_BACKUP_VIDEO_ORANGE_LABEL_INDEX);
 
             var videoWhen = ebCreateTimeFromPlacement(rebackupLayout && rebackupLayout.video ? rebackupLayout.video : null);
             if (sequence.overwriteClip) {

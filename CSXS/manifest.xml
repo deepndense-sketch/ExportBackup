@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ExtensionManifest Version="7.0"
  ExtensionBundleId="com.deepndense.exportbackup"
- ExtensionBundleVersion="4.2.0"
+ ExtensionBundleVersion="4.3.0"
  ExtensionBundleName="ExportBackup">
 
   <ExtensionList>
-    <Extension Id="com.deepndense.exportbackup.panel" Version="4.2.0"/>
+    <Extension Id="com.deepndense.exportbackup.panel" Version="4.3.0"/>
   </ExtensionList>
 
   <ExecutionEnvironment>

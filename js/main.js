@@ -24,6 +24,7 @@ const EXPORT_MODE_PREMIERE = "premiere";
 const EXPORT_MODE_MEDIA_ENCODER = "mediaEncoder";
 const EXPORT_MANIFEST_SUFFIX = "_ExportBackupMap.json";
 const REBACKUP_TEMP_MARKER = "_REBKP_TEMP";
+const REBACKUP_OLD_MARKER = "_REBKP_OLD_";
 const EXPORT_MONITOR_INTERVAL_MS = 5000;
 const EXPORT_MONITOR_STABLE_PASSES = 2;
 const EXPORT_MONITOR_TIMEOUT_MS = 6 * 60 * 60 * 1000;
@@ -1556,6 +1557,10 @@ function scanExportFolderForSequence(folderPath, sequenceName, manifest, options
             const absolutePath = path.join(folderPath, fileName);
             const lowerName = fileName.toLowerCase();
 
+            if (lowerName.includes(REBACKUP_OLD_MARKER.toLowerCase())) {
+                return;
+            }
+
             if (!videoPath && lowerName.startsWith(backupPrefix)) {
                 videoPath = absolutePath;
                 return;
@@ -1931,40 +1936,104 @@ async function replaceRebackupFile(entry, fileIndex, totalFiles) {
     return { ok: true };
 }
 
+function getManifestPreservedPaths(manifest) {
+    const expectedFiles = manifest && Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
+    const paths = [];
+    const seen = {};
+
+    expectedFiles.forEach((entry) => {
+        const entryPaths = entry && Array.isArray(entry.preservedPaths) ? entry.preservedPaths : [];
+        entryPaths.forEach((filePath) => {
+            const key = getPathComparisonKey(filePath);
+            if (key && !seen[key]) {
+                seen[key] = true;
+                paths.push(filePath);
+            }
+        });
+    });
+
+    return paths;
+}
+
+function getIncompleteExpectedExportPaths(manifest) {
+    const expectedFiles = manifest && Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
+    return expectedFiles
+        .filter((entry) => {
+            if (!entry || !entry.path || !fileExists(entry.path)) {
+                return true;
+            }
+            try {
+                return fs.statSync(entry.path).size < 1;
+            } catch (error) {
+                return true;
+            }
+        })
+        .map((entry) => (entry && entry.path) || "Unknown export file");
+}
+
+function assertExpectedExportsAreReady(manifest) {
+    const incompletePaths = getIncompleteExpectedExportPaths(manifest);
+    if (incompletePaths.length) {
+        throw new Error([
+            "New Re-backup export files are not complete yet.",
+            "The preserved old clips were left untouched.",
+            incompletePaths.join(String.fromCharCode(10))
+        ].join(String.fromCharCode(10)));
+    }
+}
+
 async function finalizeRebackupFiles(manifest) {
     const expectedFiles = manifest && Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
     const replacementFiles = expectedFiles.filter((entry) => entry && entry.path && entry.finalPath && entry.path !== entry.finalPath);
+    const preservedPaths = getManifestPreservedPaths(manifest);
+    const lineBreak = String.fromCharCode(10);
 
     if (!manifest || manifest.rebackupReplacementPrepared !== true) {
-        throw new Error("Re-backup cleanup was not verified, so TEMP files were not renamed.");
+        throw new Error("Re-backup cleanup was not verified, so local backup files were not finalized.");
     }
 
-    if (!replacementFiles.length) {
-        manifest.rebackupFinalized = true;
-        return manifest;
+    if (replacementFiles.length || preservedPaths.length) {
+        await waitBeforeLocalFileStep(
+            "Premiere cleanup is done. Local backup cleanup will start next.",
+            2500
+        );
     }
 
-    await waitBeforeLocalFileStep(
-        "Premiere cleanup is done. Local file replacement will start next.",
-        2500
-    );
+    if (replacementFiles.length) {
+        setStatus(
+            "Replacing local backup files." + lineBreak +
+            "Files to rename: " + replacementFiles.length + "."
+        );
 
-    setStatus(
-        "Replacing local backup files.\n" +
-        `Files to rename: ${replacementFiles.length}.`
-    );
+        for (let i = 0; i < replacementFiles.length; i += 1) {
+            const entry = replacementFiles[i];
+            await replaceRebackupFile(entry, i + 1, replacementFiles.length);
+            entry.path = entry.finalPath;
+            entry.name = path.basename(entry.finalPath);
+        }
+    }
 
-    for (let i = 0; i < replacementFiles.length; i += 1) {
-        const entry = replacementFiles[i];
-        await replaceRebackupFile(entry, i + 1, replacementFiles.length);
-        entry.path = entry.finalPath;
-        entry.name = path.basename(entry.finalPath);
+    if (preservedPaths.length) {
+        setStatus(
+            "New exports are complete." + lineBreak +
+            "Deleting preserved old backup files: " + preservedPaths.length + "."
+        );
+
+        for (let i = 0; i < preservedPaths.length; i += 1) {
+            await removeFileIfExists(preservedPaths[i], "preserved old backup file");
+        }
+
+        expectedFiles.forEach((entry) => {
+            if (entry) {
+                entry.preservedPaths = [];
+            }
+        });
+        manifest.rebackupPreservedCleanupDone = true;
     }
 
     manifest.rebackupFinalized = true;
     return manifest;
 }
-
 function replacePathExtension(filePath, extension) {
     const parsedPath = path.parse(filePath || "");
     const resolvedExtension = String(extension || "").startsWith(".") ? String(extension || "") : `.${extension}`;
@@ -2258,7 +2327,7 @@ async function recoverRebackupTempFiles(folderPath, sequenceName, manifest, opti
     await ensureRebackupTempFilesAreStable(recoveryInfo.entries);
 
     const recoveryManifest = Object.assign({
-        version: 4,
+        version: 5,
         createdAt: new Date().toISOString(),
         folderPath,
         sequenceName,
@@ -2272,7 +2341,7 @@ async function recoverRebackupTempFiles(folderPath, sequenceName, manifest, opti
         projectPath: ""
     }, manifest || {});
 
-    recoveryManifest.version = Math.max(4, parseInt(recoveryManifest.version, 10) || 0);
+    recoveryManifest.version = Math.max(5, parseInt(recoveryManifest.version, 10) || 0);
     recoveryManifest.folderPath = folderPath;
     recoveryManifest.sequenceName = recoveryManifest.sequenceName || sequenceName;
     recoveryManifest.baseName = recoveryManifest.baseName || recoveryInfo.baseName;
@@ -2307,7 +2376,7 @@ function updateAlignFolder(folderPath) {
 
 function createExportManifestFromHostResult(parsed) {
     return {
-        version: 4,
+        version: 5,
         createdAt: new Date().toISOString(),
         folderPath: exportFolder,
         sequenceName: parsed.sequenceName || "",
@@ -2316,6 +2385,7 @@ function createExportManifestFromHostResult(parsed) {
         audioFormat: parsed.audioFormat || getSelectedAudioFormat(),
         exportMode: parsed.exportMode || getSelectedExportMode(),
         rebackup: parsed.rebackup === true,
+        rebackupPrepared: parsed.rebackupPrepared === true,
         rebackupLayout: parsed.rebackupLayout || null,
         expectedFiles: Array.isArray(parsed.queuedFiles) ? parsed.queuedFiles : [],
         manifestPath: "",
@@ -2398,6 +2468,21 @@ async function runAlignmentFlow(folderPath, options) {
 
         let manifest = settings.manifest || readManifestForSequence(folderPath, activeSequenceName);
         const manifestOnly = settings.manifestOnly === true && !!manifest;
+
+        if (
+            manifest &&
+            manifest.rebackup === true &&
+            manifest.rebackupPrepared === true &&
+            manifest.rebackupReplacementPrepared !== true &&
+            getManifestPreservedPaths(manifest).length
+        ) {
+            assertExpectedExportsAreReady(manifest);
+            setStatus("New Re-backup files found. Removing preserved old media before alignment...");
+            await prepareRebackupReplacement(manifest);
+            await finalizeRebackupFiles(manifest);
+            manifest.manifestPath = writeExportManifest(manifest);
+        }
+
         const recoveryResult = await recoverRebackupTempFiles(folderPath, activeSequenceName, manifest, { manifestOnly });
         if (recoveryResult.recovered) {
             manifest = recoveryResult.manifest;
@@ -2757,8 +2842,8 @@ async function runExport(isRebackup) {
         saveBackupVideoTrack(resolvedBackupVideoTrackNumber);
     }
 setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
-        ? (isRebackup ? "Rendering checked re-backup files in Premiere Pro...\nUsing the recorded backup layout." : `Rendering backup files in Premiere Pro...\nBackup track: V${resolvedBackupVideoTrackNumber}`)
-        : (isRebackup ? "Queueing checked re-backup jobs...\nUsing the recorded backup layout." : `Queueing backup jobs...\nBackup track: V${resolvedBackupVideoTrackNumber}`));
+        ? (isRebackup ? "Rendering checked re-backup files in Premiere Pro...\nExisting backup clips stay until export finishes." : `Rendering backup files in Premiere Pro...\nBackup track: V${resolvedBackupVideoTrackNumber}`)
+        : (isRebackup ? "Queueing checked re-backup jobs...\nExisting backup clips stay until export finishes." : `Queueing backup jobs...\nBackup track: V${resolvedBackupVideoTrackNumber}`));
 
     const selectedItemsJson = JSON.stringify(selectedQueueItems);
     const script = `exportBackup.runBackupQueue("${escapeForEvalScript(exportFolder)}","${escapeForEvalScript(videoPresetPath)}","${escapeForEvalScript(mp3PresetPath)}","${escapeForEvalScript(wavPresetPath)}","${escapeForEvalScript(selectedAudioFormat)}",${resolvedBackupVideoTrackNumber},${removeSequenceMarkers ? "true" : "false"},"${escapeForEvalScript(selectedItemsJson)}","${escapeForEvalScript(selectedExportMode)}",${isRebackup ? "true" : "false"},${autoEmptyTrack ? "true" : "false"})`;
@@ -2766,8 +2851,34 @@ setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
     const parsed = parseHostResult(result);
 
     if (!parsed || parsed.ok === false) {
-        const message = (parsed && parsed.message) || "Backup export failed.";
-        setStatus(message);
+        let message = (parsed && parsed.message) || "Backup export failed.";
+        const lineBreak = String.fromCharCode(10);
+
+        if (
+            parsed &&
+            parsed.rebackupPrepared === true &&
+            Array.isArray(parsed.queuedFiles) &&
+            parsed.queuedFiles.length
+        ) {
+            try {
+                const recoveryManifest = createExportManifestFromHostResult(parsed);
+                recoveryManifest.exportFailed = true;
+                recoveryManifest.manifestPath = writeExportManifest(recoveryManifest);
+                updateAlignFolder(exportFolder);
+                message +=
+                    lineBreak + lineBreak +
+                    "Existing backup clips remain linked to preserved old files." +
+                    lineBreak +
+                    "Retry Re-backup, or use Align Existing after all new exports exist.";
+            } catch (manifestError) {
+                message +=
+                    lineBreak + lineBreak +
+                    "Could not write the preserved-file recovery map: " +
+                    manifestError.message;
+            }
+        }
+
+        setStatus(message, "error");
         showBlockingMessage(message);
         setBusyState(false);
         return;
@@ -2777,6 +2888,7 @@ setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
         const manifest = createExportManifestFromHostResult(parsed);
         manifest.manifestPath = writeExportManifest(manifest);
         if (manifest.rebackup && parsed.exportMode === EXPORT_MODE_PREMIERE) {
+            assertExpectedExportsAreReady(manifest);
             await prepareRebackupReplacement(manifest);
             await finalizeRebackupFiles(manifest);
             manifest.manifestPath = writeExportManifest(manifest);
@@ -2803,12 +2915,16 @@ setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
             return;
         }
 
+        const lineBreak = String.fromCharCode(10);
         const message = isRebackup
             ? (
-                "Re-backup rendered the _REBKP_TEMP files, but could not replace the old files.\n" +
-                `${error.message}\nUse Align Existing to retry cleanup, rename the TEMP files, and align them.`
+                "Re-backup export finished, but old backup cleanup was not completed." +
+                lineBreak +
+                error.message +
+                lineBreak +
+                "Use Align Existing to retry cleanup and align the completed exports."
             )
-            : `Queue created, but the export map could not be written.\n${error.message}`;
+            : "Queue created, but the export map could not be written." + lineBreak + error.message;
         if (isRebackup) {
             showAlignmentRecoveryError(message);
         } else {
@@ -2816,7 +2932,6 @@ setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
         }
     }
 }
-
 async function alignExistingFolder() {
     if (busy) {
         return;

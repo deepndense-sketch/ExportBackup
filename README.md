@@ -10,7 +10,7 @@ Run `deploy_extension.bat`.
 
 It installs the panel here:
 
-`C:\Program Files (x86)\Common Files\Adobe\CEP\extensions\ExportBackup`
+`%APPDATA%\Adobe\CEP\extensions\ExportBackup`
 
 Restart Premiere Pro after installing.
 
@@ -24,7 +24,7 @@ Restart Premiere Pro after installing.
 
 ## Backup
 
-1. Choose `BACKUP TRACK`.
+1. Choose `BACKUP TO`, or select `TO EMPTY TRACK`.
 2. Choose `Premiere` or `Media Encoder`.
 3. Choose `MP3` or `WAV`.
 4. Click `Refresh` to load the track list.
@@ -37,11 +37,15 @@ If backup files already exist, use `Re-backup`.
 
 Use `Re-backup` when the backup files are already in the project.
 
-Re-backup exports new backup files, replaces the old backup files, keeps the correct names, and aligns the new backup media back into the sequence.
+Re-backup exports only the checked backup video and audio items, replaces their old files, keeps the correct names, and aligns the new backup media back into the sequence. Unchecked backup items remain untouched.
 
-For re-backup, the queue checkboxes and merge selections are ignored. ExportBackup records the existing backup clips before export, exports audio from the original source tracks, and restores every video track to its exact pre-export visibility state. After replacement, the backup video, its audio, and separate audio files return to their recorded tracks and timeline start positions. The backup MP4 audio is left as the only audible audio track.
+Before export, each selected existing backup file is preserved under a unique `_REBKP_OLD_...` name and Premiere is relinked to that preserved file. The visible project-item name stays unchanged, so the sequence still shows the normal backup name. ExportBackup then frees the real backup filename and exports the replacement directly to it.
 
-Before any `_REBKP_TEMP` file is renamed, ExportBackup removes old final-file clips and automatically imported TEMP-file clips from every sequence. Because Premiere exposes deletion for bins rather than ordinary footage items, the targeted backup items are moved into a temporary cleanup bin and that bin is deleted. ExportBackup then verifies by project-item identity that no online or offline target remains anywhere in the project. If Premiere Pro keeps an item or file locked, the completed TEMP renders are left untouched. Run `Align Existing` on the export folder to retry the verified cleanup, rename, import, and alignment transaction.
+The selected backup video layer stays visible and is included in the MP4 render. Video tracks above the selected backup track are temporarily hidden, then every video track returns to its exact previous visibility state.
+
+Only after every selected export is complete does ExportBackup remove the preserved old clips and files, import the replacements, and restore their recorded tracks and timeline positions. If export or cleanup fails, preserved files remain available. Retry Re-backup, or use Align Existing after the completed exports exist.
+
+Imported backup MP4 media uses an Orange label. Imported backup MP3, WAV, and merged audio media uses a Brown label.
 
 ## Align Existing
 
@@ -63,7 +67,7 @@ Other audio tracks can still be selected normally.
 
 The panel uses presets from the `presets` folder inside the extension.
 
-Click `Show Presets` only if you need to change the preset files.
+Click `Change Export Presets` only if you need to change the preset files.
 
 ## Extra Options
 

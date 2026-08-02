@@ -207,6 +207,8 @@ test('Re-backup preserves and relinks old media before freeing the final filenam
     let mediaPath = sourcePath;
     let saveCount = 0;
     let blockedCopyTarget = '';
+    let removeCount = 0;
+    let renameCount = 0;
 
     function normalizeFilePath(filePath) {
         return path.win32.normalize(String(filePath || ''));
@@ -235,10 +237,12 @@ test('Re-backup preserves and relinks old media before freeing the final filenam
         }
 
         remove() {
+            removeCount += 1;
             return files.delete(this.fsName);
         }
 
         rename(newName) {
+            renameCount += 1;
             if (!files.has(this.fsName)) {
                 return false;
             }
@@ -319,6 +323,9 @@ test('Re-backup preserves and relinks old media before freeing the final filenam
     assert.equal(recoveredFinalPath, sourcePath);
     assert.equal(mediaItem.name, path.win32.basename(sourcePath));
     assert.equal(saveCount, 1);
+    assert.equal(renameCount, 1);
+    assert.equal(removeCount, 0);
+    assert.equal(requestedFiles[0].preservedPaths.length, 2);
     assert.ok(releasePaths.includes(sourcePath));
     assert.ok(releasePaths.includes(preservedPath));
 
@@ -333,7 +340,71 @@ test('Re-backup preserves and relinks old media before freeing the final filenam
     assert.equal(files.has(preservedPath), true);
     assert.equal(mediaPath, preservedPath);
 });
-test('preserved filenames remain recognizable after an interrupted Re-backup', () => {
+test('Re-backup retries a temporarily locked selected file after 10 and 20 seconds', () => {
+    const sourcePath = path.win32.join('D:', 'Backups', 'Scene_Track1.wav');
+    const files = new Set([sourcePath]);
+    const sleeps = [];
+    let renameCount = 0;
+    let removeCount = 0;
+
+    class MockFile {
+        constructor(filePath) {
+            this.fsName = path.win32.normalize(String(filePath || ''));
+            this.name = path.win32.basename(this.fsName);
+        }
+
+        get exists() {
+            return files.has(this.fsName);
+        }
+
+        copy(targetPath) {
+            if (!files.has(this.fsName)) return false;
+            files.add(path.win32.normalize(String(targetPath)));
+            return true;
+        }
+
+        remove() {
+            removeCount += 1;
+            return false;
+        }
+
+        rename(newName) {
+            renameCount += 1;
+            if (renameCount < 3 || !files.has(this.fsName)) return false;
+            const renamedPath = path.win32.join(path.win32.dirname(this.fsName), String(newName));
+            files.delete(this.fsName);
+            files.add(renamedPath);
+            this.fsName = renamedPath;
+            this.name = path.win32.basename(renamedPath);
+            return true;
+        }
+    }
+
+    const { context } = loadHostLogic(undefined, {
+        File: MockFile,
+        $: { sleep(milliseconds) { sleeps.push(milliseconds); } }
+    });
+    context.requestedFilesUnderTest = [{
+        kind: 'audio',
+        path: path.win32.join('D:', 'Backups', 'Scene_Track1_REBKP_TEMP.wav'),
+        finalPath: sourcePath,
+        sourceMediaPath: sourcePath,
+        trackNumber: 1,
+        trackNumbers: [1]
+    }];
+
+    const result = JSON.parse(vm.runInContext(
+        'JSON.stringify(ebPrepareRebackupMediaForDirectExport(requestedFilesUnderTest))',
+        context
+    ));
+
+    assert.equal(result.preservedCount, 1);
+    assert.equal(files.has(sourcePath), false);
+    assert.equal(renameCount, 3);
+    assert.equal(removeCount, 2);
+    assert.deepEqual(sleeps, [4000, 10000, 20000]);
+    assert.equal(context.requestedFilesUnderTest[0].preservedPaths.length, 2);
+});test('preserved filenames remain recognizable after an interrupted Re-backup', () => {
     const { context } = loadHostLogic();
     context.preservedVideoName = 'Scene_BACKUP_REBKP_OLD_1785000000000_1.mp4';
     context.preservedAudioName = 'Scene_Track1-2_REBKP_OLD_1785000000000_2.wav';
@@ -719,6 +790,101 @@ test('old backup clips are removed from every project sequence, including offlin
     assert.equal(secondTrack.clips.numItems, 0);
 });
 
+test('Re-backup recognizes its V track through a preserved media path', () => {
+    const finalPath = 'D:\\Backups\\Scene_BACKUP.mp4';
+    const preservedPath = 'D:\\Backups\\Scene_BACKUP_REBKP_OLD_1785000000000_1.mp4';
+    const backupClip = {
+        projectItem: {
+            name: 'Temporarily relinked media',
+            getMediaPath() {
+                return preservedPath;
+            }
+        }
+    };
+    const backupTrack = makeTrack(0, [backupClip]);
+    const sequence = {
+        videoTracks: makeCollection([
+            makeTrack(0),
+            makeTrack(0),
+            makeTrack(0),
+            makeTrack(0),
+            makeTrack(0),
+            makeTrack(0),
+            makeTrack(0),
+            backupTrack
+        ], 'numTracks'),
+        audioTracks: makeCollection([], 'numTracks')
+    };
+    backupClip.remove = () => backupTrack.clips.removeItem(backupClip);
+
+    const { context } = loadHostLogic({
+        project: {
+            rootItem: { type: 2, children: makeCollection([], 'numItems') },
+            sequences: makeCollection([sequence], 'numSequences'),
+            save() {}
+        }
+    });
+    context.sequenceUnderTest = sequence;
+    context.targetPaths = [finalPath];
+
+    assert.equal(
+        vm.runInContext('ebFindManagedBackupVideoTrackNumber(sequenceUnderTest, "Scene")', context),
+        8
+    );
+    const layout = JSON.parse(vm.runInContext(
+        'JSON.stringify(ebCaptureRebackupLayout(sequenceUnderTest, "Scene"))',
+        context
+    ));
+    assert.equal(layout.video.targetTrackNumber, 8);
+    assert.equal(layout.video.mediaPath.toLowerCase(), finalPath.toLowerCase());
+
+    const removed = vm.runInContext('ebRemoveProjectClipsByMediaPaths(targetPaths, "video")', context);
+    assert.equal(removed, 1);
+    assert.equal(backupTrack.clips.numItems, 0);
+});
+test('Re-backup fallback inspects only the selected occupied video track', () => {
+    const oldFinalPath = 'D:\\Backups\\Original Scene_BACKUP.mp4';
+    const oldBackupClip = {
+        projectItem: {
+            name: 'Original Scene_BACKUP.mp4',
+            getMediaPath() {
+                return oldFinalPath;
+            }
+        }
+    };
+    const selectedTrack = makeTrack(0, [oldBackupClip]);
+    const sequence = {
+        videoTracks: makeCollection([
+            makeTrack(0),
+            makeTrack(0),
+            makeTrack(0),
+            makeTrack(0),
+            makeTrack(0),
+            makeTrack(0),
+            makeTrack(0),
+            selectedTrack,
+            makeTrack(0, [{ projectItem: { name: 'Another Scene_BACKUP.mp4' } }])
+        ], 'numTracks'),
+        audioTracks: makeCollection([], 'numTracks')
+    };
+    const { context } = loadHostLogic();
+    context.sequenceUnderTest = sequence;
+
+    assert.equal(
+        vm.runInContext('ebFindManagedBackupVideoTrackNumber(sequenceUnderTest, "Renamed Scene")', context),
+        0
+    );
+    assert.equal(
+        vm.runInContext('ebFindManagedBackupVideoTrackNumber(sequenceUnderTest, "Renamed Scene", 8)', context),
+        8
+    );
+    const layout = JSON.parse(vm.runInContext(
+        'JSON.stringify(ebCaptureRebackupLayout(sequenceUnderTest, "Renamed Scene", 8))',
+        context
+    ));
+    assert.equal(layout.video.targetTrackNumber, 8);
+    assert.equal(layout.video.mediaPath.toLowerCase(), oldFinalPath.toLowerCase());
+});
 test('media-path cleanup can target only video or only audio tracks', () => {
     const targetPath = 'D:\\Backups\\Show_BACKUP.mp4';
     const videoClip = {
@@ -1024,7 +1190,7 @@ test('Media Encoder queue failures keep Re-backup recovery metadata', () => {
     assert.match(runSource, /if \(rebackupPreservationPrepared && requestedFiles && requestedFiles\.length\)/);
     assert.match(runSource, /recoveryQueuedFiles\.push\(ebBuildQueuedFileFromRequested\(requestedFiles\[recoveryIndex\]\)\)/);
 });
-test('preserved old files are cleaned only after completed final-name exports', () => {
+test('completed Re-backup files are imported before preserved old-file cleanup', () => {
     const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
     const runStart = hostSource.indexOf('exportBackup.runBackupQueue = function');
     const runEnd = hostSource.indexOf('function ebGetRebackupReleasePaths', runStart);
@@ -1034,20 +1200,22 @@ test('preserved old files are cleaned only after completed final-name exports', 
     const exportPosition = runSource.indexOf('ebExportSequenceDirect(sequence, videoPath, videoPresetPath, workAreaType)');
 
     const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
-    const directCleanupStart = mainSource.indexOf('if (manifest.rebackup && parsed.exportMode === EXPORT_MODE_PREMIERE)');
-    const readyPosition = mainSource.indexOf('assertExpectedExportsAreReady(manifest)', directCleanupStart);
-    const premiereCleanupPosition = mainSource.indexOf('await prepareRebackupReplacement(manifest)', directCleanupStart);
+    const flowStart = mainSource.indexOf('async function runAlignmentFlow');
+    const flowEnd = mainSource.indexOf('function scheduleExportMonitorTick', flowStart);
+    const flowSource = mainSource.slice(flowStart, flowEnd);
+    const alignPosition = flowSource.indexOf('const result = await callHost(script)');
+    const cleanupPosition = flowSource.indexOf('attemptPostAlignmentCleanup(');
     const finalizeStart = mainSource.indexOf('async function finalizeRebackupFiles');
-    const finalizeEnd = mainSource.indexOf('function replacePathExtension', finalizeStart);
+    const finalizeEnd = mainSource.indexOf('async function cleanupRebackupPreservedFilesAfterAlignment', finalizeStart);
     const finalizeSource = mainSource.slice(finalizeStart, finalizeEnd);
 
     assert.ok(preparePosition >= 0);
     assert.ok(directPathPosition >= 0);
     assert.ok(exportPosition > preparePosition);
-    assert.ok(readyPosition > directCleanupStart);
-    assert.ok(premiereCleanupPosition > readyPosition);
-    assert.match(finalizeSource, /getManifestPreservedPaths/);
-    assert.ok(finalizeSource.includes('removeFileIfExists(preservedPaths[i], "preserved old backup file")'));
+    assert.ok(alignPosition >= 0);
+    assert.ok(cleanupPosition > alignPosition);
+    assert.doesNotMatch(finalizeSource, /preservedPaths|cleanupLocalFilesBestEffort/);
+    assert.match(flowSource, /New files are imported and aligned\. Old cleanup items pending/);
     assert.ok(mainSource.includes("lowerName.includes(REBACKUP_OLD_MARKER.toLowerCase())"));
     assert.match(mainSource, /New Re-backup export files are not complete yet/);
 });
@@ -1113,6 +1281,8 @@ test('Premiere cleanup saves and settles before local re-backup replacement', ()
     assert.ok(settlePosition > cleanupStart);
     assert.ok(verifyPosition > settlePosition);
     assert.match(hostSource, /projectSavedForRelease: projectSavedForRelease/);
+    assert.match(hostSource, /return ebResult\(true, "Some preserved old project items remain for post-import cleanup\."/);
+    assert.doesNotMatch(hostSource, /return ebResult\(false, "Premiere Pro still contains old backup project items/);
 });
 
 test('imported backup video is orange while backup audio remains brown', () => {
@@ -1242,40 +1412,181 @@ test('Align Existing prefers selected audio format and cleans opposite-format re
     assert.match(mainSource, /await removeFileIfExists\(entry\.oldFinalPath, "old-format backup file"\)/);
 });
 
-test('re-backup replacement retries direct delete before local rename', () => {
+test('local cleanup uses same-process paths and cannot block successful alignment', () => {
     const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const deleteStart = mainSource.indexOf('function normalizeLocalFilePath');
+    const deleteEnd = mainSource.indexOf('async function replaceRebackupFile', deleteStart);
+    const deleteSource = mainSource.slice(deleteStart, deleteEnd);
+    const flowStart = mainSource.indexOf('async function runAlignmentFlow');
+    const flowEnd = mainSource.indexOf('function scheduleExportMonitorTick', flowStart);
+    const flowSource = mainSource.slice(flowStart, flowEnd);
+    const alignPosition = flowSource.indexOf('const result = await callHost(script)');
+    const cleanupPosition = flowSource.indexOf('attemptPostAlignmentCleanup(');
 
     assert.doesNotMatch(html, /id="progressDialog"/);
-    assert.match(mainSource, /async function runLocalFileStepWithRetry/);
-    assert.match(mainSource, /for \(let attempt = 1; attempt <= 2; attempt \+= 1\)/);
-    assert.match(mainSource, /const retryDelays = \[10000\]/);
-    assert.match(mainSource, /Retrying \$\{title\} in \$\{waitSeconds\} seconds/);
-    assert.match(mainSource, /Retry \$\{attempt - 1\}\/1/);
-    assert.match(mainSource, /File is still busy\. Retrying delete in \$\{waitSeconds\} seconds/);
-    assert.match(mainSource, /Deleting \$\{label\}/);
-    assert.match(mainSource, /fs\.rmSync\(filePath, \{ force: true, maxRetries: 1, retryDelay: 100 \}\)/);
-    assert.match(mainSource, /deleteLocalFileWithWindowsShell\(filePath\)/);
-    assert.match(mainSource, /deleteLocalFileWithCmd\(filePath\)/);
-    assert.match(mainSource, /function deleteLocalFileWithExplorer\(filePath\)/);
-    assert.match(mainSource, /await tryExplorerDelete\(filePath, label\)/);
-    assert.match(mainSource, /Old file deleted with Windows Explorer/);
-    assert.match(mainSource, /function buildDeletePendingPath\(filePath\)/);
-    assert.match(mainSource, /_DELETE_PENDING_/);
-    assert.match(mainSource, /fs\.renameSync\(filePath, pendingPath\)/);
-    assert.match(mainSource, /await moveFileAsideIfNeeded\(filePath, label\)/);
-    assert.match(mainSource, /Old file moved aside/);
+    assert.match(deleteSource, /function inspectLocalFile/);
+    assert.match(deleteSource, /fs\.lstatSync\(normalizedPath\)/);
+    assert.match(deleteSource, /fs\.unlinkSync\(before\.path\)/);
+    assert.match(deleteSource, /async function cleanupLocalFilesBestEffort/);
+    assert.match(deleteSource, /const resolvedRetryDelays = Array\.isArray\(retryDelays\)/);
+    assert.match(deleteSource, /function buildDeletePendingPath/);
+    assert.match(deleteSource, /_DELETE_PENDING_/);
+    assert.match(deleteSource, /fs\.renameSync\(sourcePath, pendingPath\)/);
+    assert.doesNotMatch(deleteSource, /powershell\.exe|cmd\.exe|Shell\.Application|InvokeVerb|deleteLocalFileWithExplorer/);
+    assert.ok(alignPosition >= 0);
+    assert.ok(cleanupPosition > alignPosition);
+    assert.match(flowSource, /Backup files were imported and aligned successfully/);
     assert.doesNotMatch(mainSource, /confirm\(/);
     assert.doesNotMatch(mainSource, /_cleanup/);
-    assert.doesNotMatch(mainSource, /showLockedFileRecoveryMessage/);
     assert.doesNotMatch(mainSource, /deleteLocalFileWithElevatedShell/);
-    assert.match(mainSource, /File still busy\\n\\nPress Align Existing button to delete and import re-export\./);
 });
+test('successful Premiere cleanup without a remaining-path field stops retrying', async () => {
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const retryStart = mainSource.indexOf('async function retryPremierePreservedMediaRelease');
+    const retryEnd = mainSource.indexOf('function getUniqueCleanupPaths', retryStart);
+    const retrySource = mainSource.slice(retryStart, retryEnd);
+    const preservedPath = path.win32.join('D:', 'Backups', 'Scene_REBKP_OLD_1.mp4');
+    const context = vm.createContext({
+        ensureHostLoaded: async () => true,
+        setStatus() {},
+        callHost: async () => JSON.stringify({ ok: true, cleanupPending: false }),
+        escapeForEvalScript: (value) => value,
+        parseHostResult: JSON.parse,
+        getPathComparisonKey: (filePath) => String(filePath || '').toLowerCase(),
+        getUniqueCleanupPaths: (filePaths) => Array.from(filePaths || [])
+    });
+    vm.runInContext(retrySource, context);
+    context.manifest = {
+        expectedFiles: [{ kind: 'video', preservedPaths: [preservedPath] }],
+        premiereCleanupPendingPaths: [preservedPath]
+    };
 
+    const result = await vm.runInContext('retryPremierePreservedMediaRelease(manifest)', context);
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(Array.from(result.remainingProjectPaths), []);
+    assert.deepEqual(Array.from(context.manifest.premiereCleanupPendingPaths), []);
+});
+test('pending cleanup retries full Align Existing every three seconds until verified', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const retryStart = mainSource.indexOf('function getUniqueCleanupPaths');
+    const retryEnd = mainSource.indexOf('async function recoverRebackupTempFiles', retryStart);
+    const retrySource = mainSource.slice(retryStart, retryEnd);
+    const alignmentStart = mainSource.indexOf('async function runAlignmentFlow');
+    const alignmentEnd = mainSource.indexOf('function scheduleExportMonitorTick', alignmentStart);
+    const alignmentSource = mainSource.slice(alignmentStart, alignmentEnd);
+
+    assert.match(mainSource, /const CLEANUP_RETRY_INTERVAL_MS = 3000/);
+    assert.match(retrySource, /state\.timer = setTimeout\([\s\S]*CLEANUP_RETRY_INTERVAL_MS/);
+    assert.match(retrySource, /await runAlignmentFlow\(state\.folderPath, \{/);
+    assert.match(retrySource, /manifestOnly: !!state\.manifest/);
+    assert.match(retrySource, /cleanupRetryContext: retryContext/);
+    assert.match(retrySource, /Removing the currently aligned backup clips and importing them again/);
+    assert.match(retrySource, /queuePendingCleanupRetry\(state\)/);
+    assert.doesNotMatch(retrySource, /alignMappedFiles/);
+    assert.match(alignmentSource, /const cleanupRetryContext = settings\.cleanupRetryContext \|\| null/);
+    assert.match(alignmentSource, /if \(!cleanupRetryContext\) \{[\s\S]*await startPendingCleanupRetry\(/);
+    assert.match(mainSource, /async function alignExistingFolder\(\)[\s\S]*await stopPendingCleanupRetry\(true\);[\s\S]*await runAlignmentFlow/);
+    assert.match(html, /id="cleanupRetryPrompt"/);
+    assert.match(html, /id="cleanupRetryAlignButton"[^>]*>Align Existing</);
+});
+test('preserved paths remain retryable until both Premiere and Windows release them', async () => {
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const cleanupStart = mainSource.indexOf('async function cleanupRebackupPreservedFilesAfterAlignment');
+    const cleanupEnd = mainSource.indexOf('function replacePathExtension', cleanupStart);
+    const cleanupSource = mainSource.slice(cleanupStart, cleanupEnd);
+    const preservedPath = path.win32.join('D:', 'Backups', 'Scene_REBKP_OLD_1.mp4');
+    const context = vm.createContext({
+        cleanupLocalFilesBestEffort: async () => ({ deleted: [preservedPath], pending: [], errors: {} }),
+        getManifestPreservedPaths: (manifest) => manifest.expectedFiles[0].preservedPaths.slice(),
+        getPathComparisonKey: (filePath) => String(filePath || '').toLowerCase()
+    });
+    vm.runInContext(cleanupSource, context);
+    context.manifest = {
+        expectedFiles: [{ preservedPaths: [preservedPath] }]
+    };
+    context.preservedPath = preservedPath;
+
+    await vm.runInContext(
+        'cleanupRebackupPreservedFilesAfterAlignment(manifest, [0], [preservedPath])',
+        context
+    );
+    assert.deepEqual(Array.from(context.manifest.expectedFiles[0].preservedPaths), [preservedPath]);
+    assert.equal(context.manifest.rebackupFinalized, false);
+
+    await vm.runInContext(
+        'cleanupRebackupPreservedFilesAfterAlignment(manifest, [0], [])',
+        context
+    );
+    assert.deepEqual(Array.from(context.manifest.expectedFiles[0].preservedPaths), []);
+    assert.equal(context.manifest.rebackupFinalized, true);
+});
+test('best-effort old-file cleanup reports EBUSY as pending instead of throwing', async () => {
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const deleteStart = mainSource.indexOf('function normalizeLocalFilePath');
+    const deleteEnd = mainSource.indexOf('async function replaceRebackupFile', deleteStart);
+    const deleteSource = mainSource.slice(deleteStart, deleteEnd);
+    const targetPath = path.win32.join('D:', 'Backups', 'Scene_BACKUP_REBKP_OLD_1.mp4');
+    let targetExists = true;
+    let failDelete = true;
+    const mockFs = {
+        lstatSync() {
+            if (!targetExists) {
+                const error = new Error('File not found');
+                error.code = 'ENOENT';
+                throw error;
+            }
+            return { size: 100 };
+        },
+        chmodSync() {},
+        unlinkSync() {
+            if (failDelete) {
+                const error = new Error('resource busy or locked');
+                error.code = 'EBUSY';
+                throw error;
+            }
+            targetExists = false;
+        }
+    };
+    const context = vm.createContext({
+        fs: mockFs,
+        path,
+        setStatus() {},
+        delay: async () => {},
+        fileExists: () => targetExists,
+        getPathComparisonKey: (filePath) => path.resolve(filePath || '').toLowerCase()
+    });
+    vm.runInContext(deleteSource, context);
+    context.cleanupTarget = targetPath;
+
+    const emptyPathResult = await vm.runInContext(
+        'cleanupLocalFilesBestEffort([""], "old backup", [0])',
+        context
+    );
+    assert.deepEqual(Array.from(emptyPathResult.pending), []);
+
+    const pendingResult = await vm.runInContext(
+        'cleanupLocalFilesBestEffort([cleanupTarget], "old backup")',
+        context
+    );
+    assert.deepEqual(Array.from(pendingResult.deleted), []);
+    assert.deepEqual(Array.from(pendingResult.pending), [targetPath]);
+    assert.match(pendingResult.errors[path.resolve(targetPath).toLowerCase()], /^EBUSY:/);
+
+    failDelete = false;
+    const deletedResult = await vm.runInContext(
+        'cleanupLocalFilesBestEffort([cleanupTarget], "old backup")',
+        context
+    );
+    assert.deepEqual(Array.from(deletedResult.deleted), [targetPath]);
+    assert.deepEqual(Array.from(deletedResult.pending), []);
+});
 test('Align Existing removes sequence-managed backup clips before target-track emptiness check', () => {
     const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
 
-    assert.match(hostSource, /shouldRemove = ebIsManagedBackupTrack\(clipName, baseName\) \|\| ebIsSequenceManagedBackupTrack\(clipName, baseName\)/);
+    assert.match(hostSource, /shouldRemove = ebIsManagedBackupClip\(clip, baseName\)/);
     assert.match(
         hostSource,
         /ebRemoveManagedClipsFromTrack\(sequence\.videoTracks\[resolvedBackupTrack - 1\], sequenceBaseName, "backup", 0\);[\s\S]*if \(videoPath && ebTrackHasClips\(sequence\.videoTracks\[resolvedBackupTrack - 1\]\)\)/

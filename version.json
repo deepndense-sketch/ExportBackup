@@ -1,5 +1,5 @@
 {
-  "version": "4.3.0",
+  "version": "4.4.0",
   "channel": "main",
-  "notes": "Release 4.3.0 preserves and relinks selected existing backup media before exporting directly to the real filenames, keeps the selected backup video layer visible in the MP4 render, cleans old files only after completed exports, improves interrupted-job and Media Encoder recovery, and labels imported backup MP4 media Orange while backup audio remains Brown."
+  "notes": "Release 4.4.0 makes Re-backup locate existing backup media and recorded timeline positions from the live sequence, keeps unchecked MP4/audio items untouched, restores selected files through automatic alignment, retries temporarily locked old files after 10 and 20 seconds, and removes recovery JSON after alignment and cleanup finish."
 }

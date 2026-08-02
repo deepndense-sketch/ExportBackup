@@ -29,6 +29,7 @@ const EXPORT_MONITOR_INTERVAL_MS = 5000;
 const EXPORT_MONITOR_STABLE_PASSES = 2;
 const EXPORT_MONITOR_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const REBACKUP_RECOVERY_STABLE_WAIT_MS = 2000;
+const CLEANUP_RETRY_INTERVAL_MS = 3000;
 
 let exportFolder = null;
 let alignFolder = null;
@@ -48,6 +49,7 @@ let exportSelectionState = null;
 let mergedAudioGroups = [];
 let nextMergedAudioGroupId = 1;
 let inOutPromptResolver = null;
+let cleanupRetryState = null;
 
 function getExtensionRootPath() {
     try {
@@ -197,6 +199,7 @@ function setBusyState(nextBusy) {
     setDisabled("rebackupButton", nextBusy);
     setDisabled("chooseAlignFolderButton", nextBusy);
     setDisabled("alignFolderButton", nextBusy);
+    setDisabled("cleanupRetryAlignButton", nextBusy);
     setDisabled("alignSkipVideoCheckbox", nextBusy);
     setDisabled("alignSortProjectFilesCheckbox", nextBusy);
     setDisabled("refreshExportSelectionButton", nextBusy);
@@ -325,6 +328,62 @@ function showResultPrompt(title, message) {
     showBlockingMessage(lines.join("\n\n"));
 }
 
+function showCleanupRetryPrompt(title, message, kind) {
+    const prompt = document.getElementById("cleanupRetryPrompt");
+    const panel = document.getElementById("cleanupRetryPanel");
+    const titleElement = document.getElementById("cleanupRetryTitle");
+    const messageElement = document.getElementById("cleanupRetryMessage");
+    const alignButton = document.getElementById("cleanupRetryAlignButton");
+    if (!prompt || !panel || !titleElement || !messageElement || !alignButton) {
+        return;
+    }
+
+    titleElement.textContent = String(title || "Cleanup in progress");
+    messageElement.textContent = String(message || "");
+    panel.classList.toggle("is-success", kind === "success");
+    panel.classList.toggle("is-error", kind === "error");
+    alignButton.classList.toggle("is-hidden", kind === "success");
+    prompt.classList.remove("is-hidden");
+}
+
+function closeCleanupRetryPrompt() {
+    const prompt = document.getElementById("cleanupRetryPrompt");
+    if (prompt) {
+        prompt.classList.add("is-hidden");
+    }
+}
+
+function dismissCleanupRetryPrompt() {
+    if (cleanupRetryState) {
+        cleanupRetryState.dialogDismissed = true;
+    }
+    closeCleanupRetryPrompt();
+}
+
+function bindCleanupRetryPrompt() {
+    const prompt = document.getElementById("cleanupRetryPrompt");
+    const closeButton = document.getElementById("cleanupRetryCloseButton");
+    const alignButton = document.getElementById("cleanupRetryAlignButton");
+    if (!prompt || !closeButton || !alignButton) {
+        return;
+    }
+
+    closeButton.addEventListener("click", dismissCleanupRetryPrompt);
+    prompt.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            event.preventDefault();
+            dismissCleanupRetryPrompt();
+        }
+    });
+    alignButton.addEventListener("click", async () => {
+        alignButton.disabled = true;
+        try {
+            await alignExistingFolder();
+        } finally {
+            alignButton.disabled = false;
+        }
+    });
+}
 function closeInOutPrompt(shouldAutoSet) {
     const prompt = document.getElementById("inOutPrompt");
     const checkbox = document.getElementById("autoSetInOutCheckbox");
@@ -1675,131 +1734,75 @@ async function runLocalFileStepWithRetry(title, details, action, verifier) {
 }
 
 
-function deleteLocalFileWithExplorer(filePath) {
-    if (!filePath || !fileExists(filePath)) {
-        return { ok: true, error: "" };
+function normalizeLocalFilePath(filePath) {
+    const pathText = String(filePath || "").trim();
+    return pathText ? path.normalize(pathText) : "";
+}
+
+function inspectLocalFile(filePath) {
+    const normalizedPath = normalizeLocalFilePath(filePath);
+    if (!normalizedPath) {
+        return { path: "", exists: false, error: "", code: "" };
     }
 
     try {
-        const env = Object.assign({}, process.env, { EXPORTBACKUP_DELETE_TARGET: filePath });
-        const script = [
-            "$p=$env:EXPORTBACKUP_DELETE_TARGET",
-            "if (-not $p -or -not (Test-Path -LiteralPath $p)) { exit 0 }",
-            "$folder=Split-Path -LiteralPath $p -Parent",
-            "$name=Split-Path -LiteralPath $p -Leaf",
-            "$shell=New-Object -ComObject Shell.Application",
-            "$namespace=$shell.Namespace($folder)",
-            "if (-not $namespace) { exit 2 }",
-            "$item=$namespace.ParseName($name)",
-            "if (-not $item) { exit 3 }",
-            "$item.InvokeVerb('delete')",
-            "Start-Sleep -Milliseconds 2000",
-            "if (Test-Path -LiteralPath $p) { exit 1 }"
-        ].join("; ");
-        const result = childProcess.spawnSync(
-            "powershell.exe",
-            ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script],
-            { env, windowsHide: false, timeout: 30000, encoding: "utf8" }
-        );
-
+        const stats = fs.lstatSync(normalizedPath);
         return {
-            ok: !fileExists(filePath),
-            error: result.error ? result.error.message : (result.stderr || "")
+            path: normalizedPath,
+            exists: true,
+            size: stats.size,
+            error: "",
+            code: ""
         };
     } catch (error) {
-        return { ok: !fileExists(filePath), error: error.message };
-    }
-}
-
-async function tryExplorerDelete(filePath, label) {
-    if (!filePath || !fileExists(filePath)) {
-        return true;
-    }
-
-    setStatus(`Trying Windows Explorer delete for ${label || "old local file"}.\n${filePath}`);
-    return deleteLocalFileWithExplorer(filePath).ok;
-}
-
-function deleteLocalFileWithWindowsShell(filePath) {
-    if (!filePath || !fileExists(filePath)) {
-        return { ok: true, error: "" };
-    }
-
-    try {
-        const env = Object.assign({}, process.env, { EXPORTBACKUP_DELETE_TARGET: filePath });
-        const script = "$p=$env:EXPORTBACKUP_DELETE_TARGET; if ($p -and (Test-Path -LiteralPath $p)) { Remove-Item -LiteralPath $p -Force -ErrorAction Stop }";
-        const result = childProcess.spawnSync(
-            "powershell.exe",
-            ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-            { env, windowsHide: true, timeout: 2500, encoding: "utf8" }
-        );
-
+        if (error && error.code === "ENOENT") {
+            return { path: normalizedPath, exists: false, error: "", code: "" };
+        }
         return {
-            ok: !fileExists(filePath),
-            error: result.error ? result.error.message : (result.stderr || "")
+            path: normalizedPath,
+            exists: true,
+            error: error && error.message ? error.message : String(error || "Unknown file error"),
+            code: error && error.code ? error.code : "UNKNOWN"
         };
-    } catch (error) {
-        return { ok: !fileExists(filePath), error: error.message };
     }
 }
-
-function deleteLocalFileWithCmd(filePath) {
-    if (!filePath || !fileExists(filePath)) {
-        return { ok: true, error: "" };
-    }
-
-    try {
-        const env = Object.assign({}, process.env, { EXPORTBACKUP_DELETE_TARGET: filePath });
-        const result = childProcess.spawnSync(
-            "cmd.exe",
-            ["/d", "/s", "/c", "del /f /q \"%EXPORTBACKUP_DELETE_TARGET%\""],
-            { env, windowsHide: true, timeout: 2500, encoding: "utf8" }
-        );
-
-        return {
-            ok: !fileExists(filePath),
-            error: result.error ? result.error.message : (result.stderr || "")
-        };
-    } catch (error) {
-        return { ok: !fileExists(filePath), error: error.message };
-    }
-}
-
 
 function deleteLocalFileNow(filePath) {
-    if (!filePath || !fileExists(filePath)) {
-        return true;
+    const before = inspectLocalFile(filePath);
+    if (!before.exists) {
+        return { ok: true, path: before.path, error: "", code: "" };
     }
 
     try {
-        fs.chmodSync(filePath, 0o666);
+        fs.chmodSync(before.path, 0o666);
     } catch (error) {}
 
+    let deleteError = null;
     try {
-        if (fs.rmSync) {
-            fs.rmSync(filePath, { force: true, maxRetries: 1, retryDelay: 100 });
-        } else {
-            fs.unlinkSync(filePath);
-        }
-    } catch (error) {}
-
-    if (!fileExists(filePath)) {
-        return true;
+        fs.unlinkSync(before.path);
+    } catch (error) {
+        deleteError = error;
     }
 
-    if (deleteLocalFileWithWindowsShell(filePath).ok) {
-        return true;
+    const after = inspectLocalFile(before.path);
+    if (!after.exists) {
+        return { ok: true, path: before.path, error: "", code: "" };
     }
 
-    if (deleteLocalFileWithCmd(filePath).ok) {
-        return true;
-    }
-
-    return !fileExists(filePath);
+    return {
+        ok: false,
+        path: before.path,
+        error: deleteError && deleteError.message
+            ? deleteError.message
+            : (after.error || "Windows still reports that the file exists."),
+        code: deleteError && deleteError.code
+            ? deleteError.code
+            : (after.code || "STILL_EXISTS")
+    };
 }
 
 function buildDeletePendingPath(filePath) {
-    const parsed = path.parse(filePath);
+    const parsed = path.parse(normalizeLocalFilePath(filePath));
     const stamp = new Date().toISOString()
         .replace(/[-:TZ.]/g, "")
         .slice(0, 14);
@@ -1815,91 +1818,128 @@ function buildDeletePendingPath(filePath) {
 }
 
 function moveLocalFileAside(filePath) {
-    if (!filePath || !fileExists(filePath)) {
-        return { ok: true, pendingPath: "", error: "" };
+    const sourcePath = normalizeLocalFilePath(filePath);
+    if (!sourcePath || !inspectLocalFile(sourcePath).exists) {
+        return { ok: true, pendingPath: "", error: "", code: "" };
     }
 
-    const pendingPath = buildDeletePendingPath(filePath);
+    const pendingPath = buildDeletePendingPath(sourcePath);
     try {
-        fs.renameSync(filePath, pendingPath);
+        fs.renameSync(sourcePath, pendingPath);
         return {
-            ok: !fileExists(filePath) && fileExists(pendingPath),
+            ok: !inspectLocalFile(sourcePath).exists && inspectLocalFile(pendingPath).exists,
             pendingPath,
-            error: ""
+            error: "",
+            code: ""
         };
     } catch (error) {
         return {
-            ok: !fileExists(filePath),
-            pendingPath: !fileExists(filePath) ? pendingPath : "",
-            error: error.message
+            ok: !inspectLocalFile(sourcePath).exists,
+            pendingPath: !inspectLocalFile(sourcePath).exists ? pendingPath : "",
+            error: error && error.message ? error.message : String(error || "Rename failed"),
+            code: error && error.code ? error.code : "UNKNOWN"
         };
     }
 }
 
-async function moveFileAsideIfNeeded(filePath, label) {
-    if (!filePath || !fileExists(filePath)) {
-        return true;
+async function deleteLocalFileWithRetry(filePath, label, retryDelays) {
+    const delays = Array.isArray(retryDelays) && retryDelays.length
+        ? retryDelays
+        : [0, 1500, 5000];
+    let lastResult = { ok: true, path: normalizeLocalFilePath(filePath), error: "", code: "" };
+
+    for (let attempt = 0; attempt < delays.length; attempt += 1) {
+        if (delays[attempt] > 0) {
+            setStatus(
+                `Waiting ${Math.round(delays[attempt] / 1000)} seconds before retrying ${label}.\n` +
+                `${lastResult.path}\n` +
+                `Last error: ${lastResult.code || "UNKNOWN"}: ${lastResult.error || "File still exists."}`
+            );
+            await delay(delays[attempt]);
+        }
+
+        setStatus(`Deleting ${label}.\n${lastResult.path}\nAttempt ${attempt + 1}/${delays.length}.`);
+        lastResult = deleteLocalFileNow(lastResult.path);
+        if (lastResult.ok) {
+            return lastResult;
+        }
     }
 
-    setStatus(`Delete did not work. Trying to move ${label || "old local file"} aside.\n${filePath}`);
-    const result = moveLocalFileAside(filePath);
-    if (result.ok) {
-        setStatus(
-            `Old file moved aside.\n` +
-            `Original path is free now.\n` +
-            `${result.pendingPath || filePath}`
-        );
-        return true;
+    return lastResult;
+}
+
+async function cleanupLocalFilesBestEffort(filePaths, label, retryDelays) {
+    const uniquePaths = [];
+    const seen = {};
+    (filePaths || []).forEach((filePath) => {
+        const normalizedPath = normalizeLocalFilePath(filePath);
+        const key = getPathComparisonKey(normalizedPath);
+        if (normalizedPath && key && !seen[key] && inspectLocalFile(normalizedPath).exists) {
+            seen[key] = true;
+            uniquePaths.push(normalizedPath);
+        }
+    });
+
+    let pending = uniquePaths.slice();
+    const deleted = [];
+    const errors = {};
+    const resolvedRetryDelays = Array.isArray(retryDelays) && retryDelays.length
+        ? retryDelays
+        : [0, 1500, 5000];
+
+    for (let attempt = 0; attempt < resolvedRetryDelays.length && pending.length; attempt += 1) {
+        if (resolvedRetryDelays[attempt] > 0) {
+            setStatus(
+                `New backup files are already imported.\n` +
+                `Retrying old-file cleanup in ${Math.round(resolvedRetryDelays[attempt] / 1000)} seconds.\n` +
+                `Files remaining: ${pending.length}.`
+            );
+            await delay(resolvedRetryDelays[attempt]);
+        }
+
+        const nextPending = [];
+        pending.forEach((filePath) => {
+            const result = deleteLocalFileNow(filePath);
+            if (result.ok) {
+                deleted.push(filePath);
+                delete errors[getPathComparisonKey(filePath)];
+            } else {
+                nextPending.push(filePath);
+                errors[getPathComparisonKey(filePath)] = `${result.code || "UNKNOWN"}: ${result.error || "File still exists."}`;
+            }
+        });
+        pending = nextPending;
     }
 
-    return false;
+    return { deleted, pending, errors, label: label || "old backup file" };
 }
 
 async function removeFileIfExists(filePath, description) {
-    if (!filePath || !fileExists(filePath)) {
-        return;
-    }
-
     const label = description || "old local file";
-    const retryDelays = [10000];
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-        setStatus(`Deleting ${label}.\n${filePath}\nAttempt ${attempt}/2.`);
-        if (deleteLocalFileNow(filePath)) {
-            setStatus(
-                `Old file deleted.\n` +
-                `Original path is free now.\n` +
-                `${filePath}`
-            );
-            return;
-        }
-
-        if (await tryExplorerDelete(filePath, label)) {
-            setStatus(
-                `Old file deleted with Windows Explorer.\n` +
-                `Original path is free now.\n` +
-                `${filePath}`
-            );
-            return;
-        }
-
-        if (attempt < 2) {
-            const waitSeconds = Math.round(retryDelays[attempt - 1] / 1000);
-            setStatus(
-                `File is still busy. Retrying delete in ${waitSeconds} seconds.\n` +
-                `${filePath}\n` +
-                `Retry ${attempt}/1.`
-            );
-            await delay(retryDelays[attempt - 1]);
-        }
-    }
-
-    if (await moveFileAsideIfNeeded(filePath, label)) {
+    const normalizedPath = normalizeLocalFilePath(filePath);
+    if (!normalizedPath || !inspectLocalFile(normalizedPath).exists) {
         return;
     }
 
-    throw new Error("File still busy\n\nPress Align Existing button to delete and import re-export.");
-}
+    const deleteResult = await deleteLocalFileWithRetry(normalizedPath, label, [0, 1500, 5000]);
+    if (deleteResult.ok) {
+        return;
+    }
 
+    setStatus(`Delete did not work. Moving ${label} aside.\n${normalizedPath}`);
+    const moveResult = moveLocalFileAside(normalizedPath);
+    if (moveResult.ok) {
+        return;
+    }
+
+    throw new Error(
+        `Could not free ${label}.\n` +
+        `Path: ${normalizedPath}\n` +
+        `Delete: ${deleteResult.code || "UNKNOWN"}: ${deleteResult.error || "failed"}\n` +
+        `Rename: ${moveResult.code || "UNKNOWN"}: ${moveResult.error || "failed"}\n` +
+        "The completed replacement export was left untouched."
+    );
+}
 async function replaceRebackupFile(entry, fileIndex, totalFiles) {
     const label = entry && entry.name ? entry.name : path.basename((entry && (entry.finalPath || entry.path)) || "backup file");
     const prefix = `File ${fileIndex}/${totalFiles}: ${label}`;
@@ -1985,25 +2025,19 @@ function assertExpectedExportsAreReady(manifest) {
 async function finalizeRebackupFiles(manifest) {
     const expectedFiles = manifest && Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
     const replacementFiles = expectedFiles.filter((entry) => entry && entry.path && entry.finalPath && entry.path !== entry.finalPath);
-    const preservedPaths = getManifestPreservedPaths(manifest);
-    const lineBreak = String.fromCharCode(10);
 
     if (!manifest || manifest.rebackupReplacementPrepared !== true) {
         throw new Error("Re-backup cleanup was not verified, so local backup files were not finalized.");
     }
 
-    if (replacementFiles.length || preservedPaths.length) {
-        await waitBeforeLocalFileStep(
-            "Premiere cleanup is done. Local backup cleanup will start next.",
-            2500
-        );
-    }
-
+    // Only legacy _REBKP_TEMP recovery needs a blocking filesystem change
+    // before import. Current Re-backup exports already use their final paths.
     if (replacementFiles.length) {
-        setStatus(
-            "Replacing local backup files." + lineBreak +
-            "Files to rename: " + replacementFiles.length + "."
+        await waitBeforeLocalFileStep(
+            "Premiere cleanup is done. Legacy TEMP-file recovery will start next.",
+            1500
         );
+        setStatus(`Recovering legacy TEMP files.\nFiles to rename: ${replacementFiles.length}.`);
 
         for (let i = 0; i < replacementFiles.length; i += 1) {
             const entry = replacementFiles[i];
@@ -2013,27 +2047,42 @@ async function finalizeRebackupFiles(manifest) {
         }
     }
 
-    if (preservedPaths.length) {
-        setStatus(
-            "New exports are complete." + lineBreak +
-            "Deleting preserved old backup files: " + preservedPaths.length + "."
-        );
-
-        for (let i = 0; i < preservedPaths.length; i += 1) {
-            await removeFileIfExists(preservedPaths[i], "preserved old backup file");
-        }
-
-        expectedFiles.forEach((entry) => {
-            if (entry) {
-                entry.preservedPaths = [];
-            }
-        });
-        manifest.rebackupPreservedCleanupDone = true;
-    }
-
-    manifest.rebackupFinalized = true;
+    manifest.rebackupFilesReady = true;
     return manifest;
 }
+
+async function cleanupRebackupPreservedFilesAfterAlignment(manifest, retryDelays, premierePendingPaths) {
+    const expectedFiles = manifest && Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
+    const preservedPaths = getManifestPreservedPaths(manifest);
+    const cleanupResult = await cleanupLocalFilesBestEffort(
+        preservedPaths,
+        "preserved old backup files",
+        retryDelays
+    );
+    const retainedKeys = {};
+
+    cleanupResult.pending.forEach((filePath) => {
+        retainedKeys[getPathComparisonKey(filePath)] = true;
+    });
+    (premierePendingPaths || []).forEach((filePath) => {
+        retainedKeys[getPathComparisonKey(filePath)] = true;
+    });
+
+    expectedFiles.forEach((entry) => {
+        if (!entry || !Array.isArray(entry.preservedPaths)) {
+            return;
+        }
+        entry.preservedPaths = entry.preservedPaths.filter((filePath) => retainedKeys[getPathComparisonKey(filePath)]);
+    });
+
+    const premierePendingCount = Array.isArray(premierePendingPaths) ? premierePendingPaths.length : 0;
+    manifest.cleanupPendingPaths = cleanupResult.pending.slice();
+    manifest.cleanupErrors = cleanupResult.errors;
+    manifest.rebackupPreservedCleanupDone = cleanupResult.pending.length === 0 && premierePendingCount === 0;
+    manifest.rebackupFinalized = cleanupResult.pending.length === 0 && premierePendingCount === 0;
+    return cleanupResult;
+}
+
 function replacePathExtension(filePath, extension) {
     const parsedPath = path.parse(filePath || "");
     const resolvedExtension = String(extension || "").startsWith(".") ? String(extension || "") : `.${extension}`;
@@ -2223,14 +2272,6 @@ async function ensureRebackupTempFilesAreStable(entries) {
     }
 }
 
-async function removeStaleAudioFormatFiles(stalePaths) {
-    for (const stalePath of (stalePaths || [])) {
-        if (stalePath) {
-            await removeFileIfExists(stalePath, "older audio format file");
-        }
-    }
-}
-
 async function prepareAlignExistingCleanup(matchInfo) {
     const stalePaths = matchInfo && Array.isArray(matchInfo.staleAudioPaths) ? matchInfo.staleAudioPaths : [];
     const expectedFiles = [];
@@ -2268,8 +2309,9 @@ async function prepareAlignExistingCleanup(matchInfo) {
         await prepareRebackupReplacement({ expectedFiles });
     }
 
-    await removeStaleAudioFormatFiles(stalePaths);
+    return { stalePaths };
 }
+
 async function prepareRebackupReplacement(manifest) {
     if (!manifest || !Array.isArray(manifest.expectedFiles) || !manifest.expectedFiles.length) {
         return;
@@ -2299,14 +2341,20 @@ async function prepareRebackupReplacement(manifest) {
         );
     }
 
+    const remainingProjectPaths = Array.isArray(parsed.remainingProjectPaths)
+        ? parsed.remainingProjectPaths
+        : [];
     setStatus(
-        "Premiere cleanup complete.\n" +
+        (remainingProjectPaths.length
+            ? "Premiere replacement preparation complete; old ProjectItem cleanup will retry after import.\n"
+            : "Premiere cleanup complete.\n") +
         `Timeline clips removed: ${parseInt(parsed.removedTimelineClips, 10) || 0}.\n` +
         `Project items removed/offlined: ${(parseInt(parsed.removedProjectItems, 10) || 0) + (parseInt(parsed.offlinedProjectItems, 10) || 0)}.\n` +
-        "Step 2: replacing local files."
+        "Step 2: importing completed replacement files."
     );
 
     manifest.rebackupReplacementPrepared = true;
+    manifest.premiereCleanupPendingPaths = remainingProjectPaths;
     manifest.rebackupCleanup = {
         removedTimelineClips: parseInt(parsed.removedTimelineClips, 10) || 0,
         removedProjectItems: parseInt(parsed.removedProjectItems, 10) || 0,
@@ -2315,6 +2363,309 @@ async function prepareRebackupReplacement(manifest) {
     return parsed;
 }
 
+async function retryPremierePreservedMediaRelease(manifest) {
+    const expectedFiles = manifest && Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
+    const cleanupFiles = expectedFiles
+        .filter((entry) => entry && Array.isArray(entry.preservedPaths) && entry.preservedPaths.length)
+        .map((entry) => ({
+            kind: entry.kind,
+            preservedPaths: entry.preservedPaths.slice()
+        }));
+    const recordedPendingPaths = manifest && Array.isArray(manifest.premiereCleanupPendingPaths)
+        ? manifest.premiereCleanupPendingPaths
+        : [];
+    const representedKeys = {};
+    cleanupFiles.forEach((entry) => {
+        entry.preservedPaths.forEach((filePath) => {
+            representedKeys[getPathComparisonKey(filePath)] = true;
+        });
+    });
+    recordedPendingPaths.forEach((filePath) => {
+        const key = getPathComparisonKey(filePath);
+        if (key && !representedKeys[key]) {
+            representedKeys[key] = true;
+            const extension = path.extname(filePath || "").toLowerCase();
+            cleanupFiles.push({
+                kind: extension === ".mp4" ? "video" : "audio",
+                preservedPaths: [filePath]
+            });
+        }
+    });
+
+    const attemptedPaths = getUniqueCleanupPaths(
+        cleanupFiles.reduce((allPaths, entry) => allPaths.concat(entry.preservedPaths || []), [])
+    );
+    if (!cleanupFiles.length) {
+        return { ok: true, attempted: false, remainingProjectPaths: [] };
+    }
+
+    try {
+        if (!(await ensureHostLoaded())) {
+            return {
+                ok: false,
+                attempted: false,
+                remainingProjectPaths: attemptedPaths,
+                message: "Could not load Premiere host cleanup script."
+            };
+        }
+
+        setStatus("New files are aligned. Releasing preserved old Premiere references before optional file cleanup...");
+        const cleanupFilesJson = JSON.stringify(cleanupFiles);
+        const result = await callHost(`exportBackup.prepareRebackupReplacement("${escapeForEvalScript(cleanupFilesJson)}")`);
+        const parsed = parseHostResult(result);
+        const remainingProjectPaths = parsed && parsed.ok !== false
+            ? (Array.isArray(parsed.remainingProjectPaths) ? parsed.remainingProjectPaths : [])
+            : attemptedPaths;
+
+        manifest.premiereCleanupPendingPaths = remainingProjectPaths.slice();
+        return {
+            ok: !!parsed && parsed.ok !== false,
+            attempted: true,
+            remainingProjectPaths,
+            message: parsed && parsed.message ? parsed.message : "Premiere cleanup retry did not return a result."
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            attempted: true,
+            remainingProjectPaths: attemptedPaths,
+            message: error && error.message ? error.message : String(error || "Premiere cleanup retry failed.")
+        };
+    }
+}
+
+function getUniqueCleanupPaths(filePaths) {
+    const uniquePaths = [];
+    const seen = {};
+    (filePaths || []).forEach((filePath) => {
+        const normalizedPath = normalizeLocalFilePath(filePath);
+        const key = getPathComparisonKey(normalizedPath);
+        if (normalizedPath && key && !seen[key]) {
+            seen[key] = true;
+            uniquePaths.push(normalizedPath);
+        }
+    });
+    return uniquePaths;
+}
+
+async function attemptPostAlignmentCleanup(manifest, stalePaths, retryDelays) {
+    const cleanupErrors = {};
+    let deletedOldFileCount = 0;
+    let premiereCleanupPendingPaths = [];
+    let rebackupPendingPaths = [];
+
+    if (manifest && manifest.rebackup === true) {
+        const premiereCleanupRetry = await retryPremierePreservedMediaRelease(manifest);
+        premiereCleanupPendingPaths = getUniqueCleanupPaths(premiereCleanupRetry.remainingProjectPaths);
+        if (!premiereCleanupRetry.ok) {
+            cleanupErrors.premiere = premiereCleanupRetry.message;
+        }
+
+        const rebackupCleanupResult = await cleanupRebackupPreservedFilesAfterAlignment(
+            manifest,
+            retryDelays,
+            premiereCleanupPendingPaths
+        );
+        deletedOldFileCount += rebackupCleanupResult.deleted.length;
+        rebackupPendingPaths = rebackupCleanupResult.pending.slice();
+        Object.assign(cleanupErrors, rebackupCleanupResult.errors);
+    }
+
+    const staleCleanupResult = await cleanupLocalFilesBestEffort(
+        stalePaths,
+        "older audio-format files",
+        retryDelays
+    );
+    deletedOldFileCount += staleCleanupResult.deleted.length;
+    Object.assign(cleanupErrors, staleCleanupResult.errors);
+
+    const pendingPaths = getUniqueCleanupPaths(rebackupPendingPaths.concat(staleCleanupResult.pending));
+    return {
+        deletedOldFileCount,
+        pendingPaths,
+        stalePendingPaths: staleCleanupResult.pending.slice(),
+        premiereCleanupPendingPaths,
+        pendingCount: pendingPaths.length + premiereCleanupPendingPaths.length,
+        errors: cleanupErrors
+    };
+}
+
+function recordPendingCleanup(manifest, cleanupSummary) {
+    if (!manifest) {
+        return;
+    }
+
+    manifest.cleanupPendingPaths = cleanupSummary.pendingPaths.slice();
+    manifest.cleanupErrors = cleanupSummary.errors;
+    manifest.premiereCleanupPendingPaths = cleanupSummary.premiereCleanupPendingPaths.slice();
+    manifest.rebackupFinalized = cleanupSummary.pendingCount === 0;
+}
+
+async function stopPendingCleanupRetry(closePrompt) {
+    const state = cleanupRetryState;
+    if (!state) {
+        if (closePrompt !== false) {
+            closeCleanupRetryPrompt();
+        }
+        return;
+    }
+
+    cleanupRetryState = null;
+    if (state.timer) {
+        clearTimeout(state.timer);
+        state.timer = null;
+    }
+
+    const activeAttempt = state.currentAttempt;
+    if (activeAttempt) {
+        try {
+            await activeAttempt;
+        } catch (error) {}
+    }
+
+    if (closePrompt !== false) {
+        closeCleanupRetryPrompt();
+    }
+}
+
+function queuePendingCleanupRetry(state) {
+    if (!state || cleanupRetryState !== state) {
+        return;
+    }
+
+    if (state.timer) {
+        clearTimeout(state.timer);
+    }
+    state.timer = setTimeout(() => {
+        if (cleanupRetryState !== state) {
+            return;
+        }
+        state.currentAttempt = runPendingCleanupRetryAttempt(state);
+    }, CLEANUP_RETRY_INTERVAL_MS);
+}
+
+async function runPendingCleanupRetryAttempt(state) {
+    if (!state || cleanupRetryState !== state || state.running) {
+        return;
+    }
+
+    state.running = true;
+    state.attempt += 1;
+    if (!state.dialogDismissed) {
+        showCleanupRetryPrompt(
+            "ALIGN EXISTING IN PROGRESS",
+            `Removing the currently aligned backup clips and importing them again.\n\nAutomatic attempt ${state.attempt}.\nIf this is taking time, you can press Align Existing between attempts.`,
+            "pending"
+        );
+    }
+    setStatus(
+        `Automatic Align Existing retry ${state.attempt}.\n` +
+        "Removing aligned backup clips, importing the files again, and checking old-file cleanup."
+    );
+
+    try {
+        const retryContext = {};
+        const alignmentSucceeded = await runAlignmentFlow(state.folderPath, {
+            manifest: state.manifest,
+            manifestOnly: !!state.manifest,
+            skipVideo: false,
+            sortProjectFiles: false,
+            autoTriggered: true,
+            cleanupRetryContext: retryContext
+        });
+        if (cleanupRetryState !== state) {
+            return;
+        }
+        if (!alignmentSucceeded) {
+            throw new Error(retryContext.error || "Automatic Align Existing retry did not finish.");
+        }
+
+        const cleanupSummary = retryContext.cleanupSummary || {
+            stalePendingPaths: [],
+            pendingCount: 0
+        };
+        const pendingCount = parseInt(retryContext.pendingCleanupCount, 10) || 0;
+        state.stalePaths = Array.isArray(cleanupSummary.stalePendingPaths)
+            ? cleanupSummary.stalePendingPaths.slice()
+            : [];
+
+        if (pendingCount === 0) {
+            cleanupRetryState = null;
+            state.timer = null;
+            setStatus(
+                `${retryContext.successTitle || state.successTitle}\n` +
+                `Align Existing retry completed after ${state.attempt} automatic attempt(s).`,
+                "success"
+            );
+            showCleanupRetryPrompt(
+                "ALIGNMENT AND CLEANUP DONE",
+                "The backup files were imported and aligned again, and all old cleanup items are finished.",
+                "success"
+            );
+            return;
+        }
+
+        setStatus(
+            `${retryContext.successTitle || state.successTitle}\n` +
+            `Files were imported and aligned again. Cleanup items remaining: ${pendingCount}.\n` +
+            "Running Align Existing again in 3 seconds.",
+            "success"
+        );
+        if (!state.dialogDismissed) {
+            showCleanupRetryPrompt(
+                "ALIGN EXISTING IS RETRYING",
+                `The backup files were imported and aligned again.\n\n${pendingCount} cleanup item(s) remain. Running Align Existing again in 3 seconds.`,
+                "pending"
+            );
+        }
+        queuePendingCleanupRetry(state);
+    } catch (error) {
+        if (cleanupRetryState !== state) {
+            return;
+        }
+        const message = error && error.message ? error.message : String(error || "Automatic Align Existing retry failed.");
+        setStatus(
+            `${state.successTitle}\n` +
+            `Automatic Align Existing retry ${state.attempt} could not finish.\n` +
+            `Retrying again in 3 seconds.\n${message}`,
+            "success"
+        );
+        if (!state.dialogDismissed) {
+            showCleanupRetryPrompt(
+                "ALIGN EXISTING IS RETRYING",
+                `The last automatic Align Existing attempt could not finish. Retrying again in 3 seconds.\n\n${message}`,
+                "pending"
+            );
+        }
+        queuePendingCleanupRetry(state);
+    } finally {
+        state.running = false;
+        state.currentAttempt = null;
+    }
+}
+async function startPendingCleanupRetry(manifest, stalePaths, successTitle, pendingCount, folderPath) {
+    await stopPendingCleanupRetry(false);
+    const state = {
+        manifest: manifest || null,
+        folderPath: folderPath || (manifest && manifest.folderPath) || exportFolder || alignFolder || "",
+        stalePaths: getUniqueCleanupPaths(stalePaths),
+        successTitle: successTitle || "Alignment done.",
+        pendingCount: parseInt(pendingCount, 10) || 0,
+        attempt: 0,
+        timer: null,
+        currentAttempt: null,
+        running: false,
+        dialogDismissed: false
+    };
+    cleanupRetryState = state;
+
+    showCleanupRetryPrompt(
+        "ALIGN EXISTING WILL RETRY",
+        `The first import and alignment finished, but ${state.pendingCount} cleanup item(s) remain.\n\nIn 3 seconds, ExportBackup will remove the aligned backup clips, import the files again, and restore their positions.`,
+        "pending"
+    );
+    queuePendingCleanupRetry(state);
+}
 async function recoverRebackupTempFiles(folderPath, sequenceName, manifest, options) {
     const recoveryInfo = collectRebackupRecoveryEntries(folderPath, sequenceName, manifest, options);
     if (!recoveryInfo.hasTempFiles) {
@@ -2442,8 +2793,26 @@ function copyProjectToFolder(projectPath, destinationFolder) {
 
 async function runAlignmentFlow(folderPath, options) {
     const settings = options || {};
+    const cleanupRetryContext = settings.cleanupRetryContext || null;
+    const reportAlignmentFailure = (message) => {
+        const resolvedMessage = String(message || "Alignment failed.");
+        if (cleanupRetryContext) {
+            cleanupRetryContext.error = resolvedMessage;
+            setStatus(
+                `Automatic Align Existing retry could not finish.\n${resolvedMessage}\n` +
+                "Retrying again in 3 seconds.",
+                "success"
+            );
+            return false;
+        }
+        showAlignmentRecoveryError(resolvedMessage);
+        return false;
+    };
 
     if (!folderPath) {
+        if (cleanupRetryContext) {
+            return reportAlignmentFailure("No export folder is available for automatic Align Existing retry.");
+        }
         alert("Choose an export folder first.");
         return false;
     }
@@ -2455,15 +2824,12 @@ async function runAlignmentFlow(folderPath, options) {
 
     try {
         if (!(await ensureHostLoaded())) {
-            showAlignmentRecoveryError("Could not load Premiere host script.");
-            return false;
+            return reportAlignmentFailure("Could not load Premiere host script.");
         }
 
         const activeSequenceName = await getActiveSequenceName();
         if (!activeSequenceName) {
-            const message = "No active sequence is open in Premiere Pro.";
-            showAlignmentRecoveryError(message);
-            return false;
+            return reportAlignmentFailure("No active sequence is open in Premiere Pro.");
         }
 
         let manifest = settings.manifest || readManifestForSequence(folderPath, activeSequenceName);
@@ -2477,7 +2843,7 @@ async function runAlignmentFlow(folderPath, options) {
             getManifestPreservedPaths(manifest).length
         ) {
             assertExpectedExportsAreReady(manifest);
-            setStatus("New Re-backup files found. Removing preserved old media before alignment...");
+            setStatus("New Re-backup files found. Releasing selected old Premiere clips before alignment...");
             await prepareRebackupReplacement(manifest);
             await finalizeRebackupFiles(manifest);
             manifest.manifestPath = writeExportManifest(manifest);
@@ -2499,11 +2865,10 @@ async function runAlignmentFlow(folderPath, options) {
                 "No files could be matched in the chosen folder.\n" +
                 `Sequence base: ${matchInfo.baseName}\n` +
                 `Folder files: ${matchInfo.folderFiles.join(" | ")}`;
-            showAlignmentRecoveryError(message);
-            return false;
+            return reportAlignmentFailure(message);
         }
 
-        await prepareAlignExistingCleanup(matchInfo);
+        const alignmentCleanup = await prepareAlignExistingCleanup(matchInfo);
 
         const backupVideoTrackNumber = getPositiveIntValue(
             "exportVideoTrackInput",
@@ -2525,18 +2890,21 @@ async function runAlignmentFlow(folderPath, options) {
         const parsed = parseHostResult(result);
 
         if (!parsed || parsed.ok === false) {
-            const message = (parsed && parsed.message) || "Alignment failed.";
-            showAlignmentRecoveryError(message);
-            return false;
+            return reportAlignmentFailure((parsed && parsed.message) || "Alignment failed.");
         }
 
+        const cleanupSummary = await attemptPostAlignmentCleanup(
+            matchInfo.manifest,
+            alignmentCleanup && alignmentCleanup.stalePaths,
+            [0]
+        );
+        const deletedOldFileCount = cleanupSummary.deletedOldFileCount;
+        const premiereCleanupPendingCount = cleanupSummary.premiereCleanupPendingPaths.length;
+        let pendingCleanupCount = cleanupSummary.pendingCount;
         const shouldCopyProject = !!(getCopyProjectFileCheckbox() && getCopyProjectFileCheckbox().checked);
         const copyResult = shouldCopyProject
             ? copyProjectToFolder(parsed.projectPath, folderPath)
             : { ok: false, message: "" };
-        if (matchInfo.manifest && matchInfo.manifest.manifestPath) {
-            await removeFileIfExists(matchInfo.manifest.manifestPath, "export map file");
-        }
 
         const successTitle = getCompletionStatusTitle(settings, matchInfo.manifest);
         const lines = [successTitle, parsed.message || "Alignment completed."];
@@ -2548,19 +2916,65 @@ async function runAlignmentFlow(folderPath, options) {
         } else if (copyResult.message) {
             lines.push(copyResult.message);
         }
+        if (deletedOldFileCount > 0) {
+            lines.push(`Deleted old backup files after import: ${deletedOldFileCount}.`);
+        }
+        if (premiereCleanupPendingCount > 0) {
+            lines.push(`Old Premiere ProjectItems still pending cleanup: ${premiereCleanupPendingCount}.`);
+        }
 
+        if (matchInfo.manifest) {
+            recordPendingCleanup(matchInfo.manifest, cleanupSummary);
+
+            if (cleanupSummary.pendingCount > 0) {
+                try {
+                    matchInfo.manifest.manifestPath = writeExportManifest(matchInfo.manifest);
+                } catch (manifestError) {
+                    pendingCleanupCount += 1;
+                    lines.push(`Could not save the cleanup record yet: ${manifestError.message}`);
+                }
+            } else if (matchInfo.manifest.manifestPath) {
+                const mapDeleteResult = deleteLocalFileNow(matchInfo.manifest.manifestPath);
+                if (!mapDeleteResult.ok) {
+                    pendingCleanupCount += 1;
+                    lines.push(`Export map cleanup is pending: ${mapDeleteResult.code}: ${mapDeleteResult.error}`);
+                }
+            }
+        }
+
+        if (pendingCleanupCount > 0) {
+            lines.push(`New files are imported and aligned. Old cleanup items pending: ${pendingCleanupCount}.`);
+            lines.push("Cleanup will retry automatically every 3 seconds. If it is taking time, use Align Existing.");
+        }
         setStatus(lines.join("\n"), "success");
-        showResultPrompt(
-            successTitle,
-            settings.autoTriggered
-                ? "Backup files were imported and aligned successfully."
-                : "Existing backup files were imported and aligned successfully."
-        );
+
+        if (cleanupRetryContext) {
+            cleanupRetryContext.cleanupSummary = cleanupSummary;
+            cleanupRetryContext.pendingCleanupCount = pendingCleanupCount;
+            cleanupRetryContext.successTitle = successTitle;
+        }
+
+        if (pendingCleanupCount > 0) {
+            if (!cleanupRetryContext) {
+                await startPendingCleanupRetry(
+                    matchInfo.manifest,
+                    cleanupSummary.stalePendingPaths,
+                    successTitle,
+                    pendingCleanupCount,
+                    folderPath
+                );
+            }
+        } else if (!cleanupRetryContext) {
+            showResultPrompt(
+                successTitle,
+                settings.autoTriggered
+                    ? "Backup files were imported and aligned successfully."
+                    : "Existing backup files were imported and aligned successfully."
+            );
+        }
         return true;
     } catch (error) {
-        const message = `Alignment failed.\n${error.message}`;
-        showAlignmentRecoveryError(message);
-        return false;
+        return reportAlignmentFailure(`Alignment failed.\n${error.message}`);
     } finally {
         setBusyState(false);
     }
@@ -2762,6 +3176,8 @@ async function runExport(isRebackup) {
         return;
     }
 
+    await stopPendingCleanupRetry(true);
+
     if (!exportFolder) {
         alert("Choose an export folder first.");
         return;
@@ -2932,11 +3348,13 @@ setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
         }
     }
 }
+
 async function alignExistingFolder() {
     if (busy) {
         return;
     }
 
+    await stopPendingCleanupRetry(true);
     await runAlignmentFlow(exportFolder || alignFolder, {
         skipVideo: false,
         autoTriggered: false
@@ -2954,6 +3372,7 @@ document.addEventListener("DOMContentLoaded", () => {
     bindAutoEmptyBackupTrackOption();
     bindBackupTrackStepper();
     bindInOutPrompt();
+    bindCleanupRetryPrompt();
     resetAutoEmptyBackupTrackOption();
     markBackupInputsDirty();
     loadSavedBackupSettings();

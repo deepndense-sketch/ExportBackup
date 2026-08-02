@@ -43,7 +43,7 @@ Before export, each selected existing backup file is preserved under a unique `_
 
 The selected backup video layer stays visible and is included in the MP4 render. Video tracks above the selected backup track are temporarily hidden, then every video track returns to its exact previous visibility state.
 
-Only after every selected export is complete does ExportBackup remove the preserved old clips and files, import the replacements, and restore their recorded tracks and timeline positions. If export or cleanup fails, preserved files remain available. Retry Re-backup, or use Align Existing after the completed exports exist.
+After every selected export is complete, ExportBackup releases the selected old Premiere references, imports the replacements, and restores their recorded tracks and timeline positions before deleting preserved old files. If Premiere or Windows still reports a genuine pending item, ExportBackup runs a full Align Existing pass every 3 seconds: it removes the currently aligned backup clips, imports the files again, restores their recorded positions, and checks cleanup again. A successful zero-remaining response stops retries and removes the JSON recovery map. The retry window also offers Align Existing for a manual pass.
 
 Imported backup MP4 media uses an Orange label. Imported backup MP3, WAV, and merged audio media uses a Brown label.
 

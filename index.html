@@ -640,6 +640,34 @@ button:disabled {
     font-size: 13px;
 }
 
+.cleanup-dialog-panel {
+    border-color: rgba(255, 165, 74, 0.52);
+}
+
+.cleanup-dialog-panel h2 {
+    color: #ffd7ad;
+}
+
+.cleanup-dialog-panel .dialog-copy {
+    white-space: pre-wrap;
+    color: #e4eaf1;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.55;
+}
+
+.cleanup-dialog-panel.is-success {
+    border-color: rgba(86, 226, 135, 0.58);
+    background: #182a22;
+}
+
+.cleanup-dialog-panel.is-success h2 {
+    color: #8fffb4;
+}
+
+.cleanup-dialog-panel.is-error {
+    border-color: rgba(255, 112, 112, 0.58);
+}
 @media (max-width: 860px) {
     .action-line {
         grid-template-columns: 1fr;
@@ -792,6 +820,16 @@ button:disabled {
         <div class="dialog-actions">
             <button id="inOutPromptCancelButton" type="button" class="secondary">Cancel</button>
             <button id="inOutPromptOkButton" type="button">OK</button>
+        </div>
+    </div>
+</div>
+<div id="cleanupRetryPrompt" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="cleanupRetryTitle" tabindex="-1">
+    <div id="cleanupRetryPanel" class="dialog-panel cleanup-dialog-panel stack">
+        <h2 id="cleanupRetryTitle">Cleanup is retrying</h2>
+        <p id="cleanupRetryMessage" class="dialog-copy"></p>
+        <div class="dialog-actions">
+            <button id="cleanupRetryCloseButton" type="button" class="secondary">Close</button>
+            <button id="cleanupRetryAlignButton" type="button">Align Existing</button>
         </div>
     </div>
 </div>

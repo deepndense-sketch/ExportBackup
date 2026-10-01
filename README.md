@@ -1,8 +1,20 @@
-# ExportBackup User Manual
+# Backup Project User Manual
 
-ExportBackup helps you make a backup MP4 and separate audio exports from the active Premiere Pro sequence, then brings them back into the project and lines them up.
+Backup Project includes Export Backup and Project Collector. Export Backup makes a backup MP4 and separate audio exports from the active Premiere Pro sequence, then brings them back into the project and lines them up.
 
-The `Queue Backup Exports` section has a visual `Hide`/`Show` control and always opens shown when the panel loads.
+Version **4.7.0** keeps Backup, Re-backup, and Align Existing visible, with More settings expanded by default. Project Root exports go into a `BACKUP` folder. Re-backup and Align Existing use discovered backup locations independently of the selected new-backup destination. Align Existing also cleans up recognized obsolete backup files when they are unused and a replacement exists.
+
+## Project Collector tab
+
+The panel includes separate **Export Backup** and **Project Collector** tabs. Each keeps its own settings and actions; switching tabs does not export or copy anything. Collector is bundled in `collector/` and is deployed with ExportBackup. Use the Export Backup version button to update the combined package.
+
+Collector uses **Premiere track locks**: lock a track to exclude its media. While Collector is visible, a lightweight check updates the track display about once per second; copying pauses these checks and reads fresh locks before starting. Added sequences appear as full-name tabs with individual remove buttons. Switching tabs only changes the visible track panel; all added sequences remain selected for collection. File counts include media inside nested sequences. Use Refresh after other sequence edits.
+
+Choose **Show / Category** from Collector's top Path dropdown to preview the destination from the saved project filename. Collector uses `Z:\2017\_SMTV2 PROJECT FOLDER\@ SHOWS`, then the built-in category (such as `WOW`), then the project filename with the category moved to the front, without `.prproj`. For example, `3279 3280 WOW Socrates_Is virtue known or learned.prproj` collects into `@ SHOWS\WOW\WOW 3279 3280 Socrates_Is virtue known or learned`. MAIN/INTRO follow this same rule; there is no episode-range lookup. Preview does not access the network. The copy action creates the project folder and media subfolders, and reports actual filesystem errors if the destination cannot be written. Choose **Manual Path** to select a destination yourself.
+
+Both tabs use the outer panel scrollbar. Collector expands to fit its content and has only a Refresh button above its controls.
+
+Collector also offers **Project root**, which copies directly into the directory containing the saved `.prproj`, without category validation or an extra project-name folder. **Manual folder** keeps the chosen destination plus project-name folder. The destination mode is saved, and destination controls are locked during copying.
 
 ## Install
 
@@ -10,17 +22,27 @@ Run `deploy_extension.bat`.
 
 It installs the panel here:
 
-`%APPDATA%\Adobe\CEP\extensions\ExportBackup`
+`%APPDATA%\Adobe\CEP\extensions\Backup Project`
 
 Restart Premiere Pro after installing.
 
 ## Before Backup
 
-1. Open the Premiere Pro sequence you want to backup.
-2. Set the sequence In and Out points.
-3. If any audio track has Solo enabled, turn Solo off before exporting.
-4. Open the ExportBackup panel.
-5. Click `Choose Folder` and select the export folder.
+1. Save the Premiere project with one configured category and at least one number somewhere in its filename. They may appear in either order, so `PE 3226.prproj`, `3226 PE.prproj`, and `Pierre 3226 WOW Gassendi.prproj` are valid.
+2. Open the Premiere Pro sequence you want to backup.
+3. Set the sequence In and Out points.
+4. If any audio track has Solo enabled, turn Solo off before exporting.
+5. Open the Backup Project panel and choose `FTP / Category`, `Project Root`, or `Manual Path`.
+
+`FTP / Category` finds the category anywhere in the Premiere project filename, matches it to a folder under `Y:\@ Backup` while ignoring the folder's leading `@` and trailing `BACKUP`, and uses one reusable child folder with a normalized `CATEGORY NUMBER(S) optional name` format. For example, `3226 WOW Pierre Gassendi.prproj` is routed to `Y:\@ Backup\@ WOW BACKUP\WOW 3226 Pierre Gassendi`. The category-and-number naming requirement is checked only in this mode. `Project Root` and `Manual Path` accept any saved Premiere project name. Choosing a path switches to Manual Path; selecting FTP / Category again overrides that manual path with the category-resolved path.
+
+Projects containing `MAIN` or `INTRO` use grouped episode routing for any episode number. ExportBackup finds an existing range container whose category and inclusive number range match, such as `WOW 3240-3251_Italy_19990522_SM PL`, then creates or reuses a number-only episode folder inside it. Thus `3250 WOW MAIN.prproj` and `3250 WOW INTRO.prproj` both use `...\WOW 3240-3251_Italy_19990522_SM PL\3250`. ExportBackup never creates the range container; if none matches, it asks the user to create the category project root folder first.
+
+Use `Copy Existing Backups` to automatically find already-exported backup media used by the active sequence and copy it into the currently resolved rule-based destination. No source-folder selection is required. The plugin recognizes active-sequence filenames and duration-matched legacy names. It preserves the originals, does not change Premiere links, verifies copied file sizes, and refuses to overwrite a different existing destination file.
+
+`Project Root` exports beside the saved `.prproj` file.
+
+Use the Category Manager in the panel to add a category or delete the selected category. Changes are saved locally and immediately control both project-name validation and FTP category-folder matching. `SM URGENT MESSAGES`, `TRIBUTE`, and `QYP` are not included in the default category list.
 
 ## Backup
 
@@ -33,9 +55,13 @@ Restart Premiere Pro after installing.
 
 If backup files already exist, use `Re-backup`.
 
+Backup-like filenames alone do not mean this sequence has been backed up. A candidate must be the only clip on its track and its timeline duration must match the full sequence or current In/Out range within 0.2 seconds. Short excerpts, mixed source tracks, and empty renamed tracks stay ordinary source tracks.
+
+Before a new Backup, matching candidates are listed by their actual names, paths, and tracks. This includes old names after a sequence rename. You can continue with a new Backup or cancel to review them. Different-name candidates remain selectable as source media until you choose how to handle them. A Premiere reference to a missing output is reported separately; only an actual existing destination file blocks a new Backup. Choose an empty video track for the new backup. Alignment cleanup targets the replacement paths and preserves unrelated backup-named source clips.
+
 ## Re-backup
 
-Use `Re-backup` when the backup files are already in the project.
+Use `Re-backup` when the backup files are already in the project. Existing merge groups load automatically, and Re-backup always makes the current queue checkboxes and merge groups authoritative. Use `Clear Merges` only when you want to rebuild the grouping. Replaced, renamed, unselected, or otherwise obsolete backup audio is removed from Premiere and deleted after the new files are aligned.
 
 Re-backup exports only the checked backup video and audio items, replaces their old files, keeps the correct names, and aligns the new backup media back into the sequence. Unchecked backup items remain untouched.
 
@@ -51,7 +77,9 @@ Imported backup MP4 media uses an Orange label. Imported backup MP3, WAV, and me
 
 Use `Align Existing` when the files were already exported and you only want to import and align them.
 
-Click `Choose Folder` first, then click `Align Existing`.
+Select the same backup location mode, then click `Align Existing`.
+
+If a sequence was renamed after its backups were imported, Align Existing can rename old backup files to the active sequence name. It only considers media already used in the active sequence, requires the standard `_BACKUP` or `_Track...` filename rule, checks the clip duration against the active sequence, and refuses to guess when multiple old basenames match. Recorded timeline positions are restored after the rename.
 
 ## Merge Audio Tracks
 

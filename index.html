@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>ExportBackup</title>
+<title>Backup Project</title>
 <style>
 :root {
     --bg: #121417;
@@ -78,6 +78,14 @@ p {
 
 .warning {
     color: var(--warning);
+}
+
+#categoryDestinationNote {
+    color: var(--accent);
+}
+
+#categoryDestinationNote::before {
+    content: "Note: ";
 }
 
 .stack {
@@ -160,8 +168,9 @@ p {
 
 .track-warning {
     color: var(--warning);
-    font-size: 12px;
-    font-weight: 800;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.5;
 }
 
 button {
@@ -224,6 +233,13 @@ button.preset-button,
     border-radius: 8px;
     font-size: 11px;
     line-height: 1.1;
+}
+
+.selection-list-button-group {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 #refreshExportSelectionButton {
@@ -467,6 +483,28 @@ button:disabled {
     background: var(--green);
 }
 
+.category-manager {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) auto auto;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid rgba(97, 168, 255, 0.2);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.category-manager input,
+.category-manager select {
+    min-width: 0;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    padding: 9px 10px;
+    font: inherit;
+}
+
 .field {
     display: grid;
     gap: 6px;
@@ -678,15 +716,87 @@ button:disabled {
         grid-template-columns: 118px minmax(0, 1fr);
     }
 
+    .category-manager {
+        grid-template-columns: 1fr 1fr;
+    }
+
     .nowrap {
         flex-wrap: wrap;
     }
 }
+[hidden] { display: none !important; }
+.plugin-tabs { display: flex; gap: 8px; max-width: 800px; margin: 0 auto 12px; padding: 0 4px; border-bottom: 1px solid #48505b; }
+.plugin-tabs button {
+    position: relative; flex: 1; min-width: 0; padding: 17px 10px;
+    border: 1px solid #48505b; border-bottom: 0; border-radius: 11px 11px 0 0;
+    background: #25282e; font-size: 15px; font-weight: 700;
+}
+#exportTab { color: #ffb467; }
+#collectorTab { color: #96d1ff; }
+#exportTab[aria-selected="true"] { background: linear-gradient(110deg, #ffd17c, #ff983d); color: #261707; border-color: #ffd17c; }
+#collectorTab[aria-selected="true"] { background: linear-gradient(110deg, #9ed7ff, #54a7ed); color: #0b2335; border-color: #a4d9ff; }
+.plugin-tabs [aria-selected="true"]::after {
+    content: ""; position: absolute; bottom: -8px; left: calc(50% - 8px);
+    border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 8px solid #ffad54;
+}
+#collectorTab[aria-selected="true"]::after { border-top-color: #75bef6; }
+.plugin-tabs button:focus-visible { outline: 2px solid #edf2f7; outline-offset: 3px; }
+#exportPanel {
+    max-width: 800px; margin: 0 auto; padding: 12px;
+    border: 1px solid #654a34; border-top: 3px solid #ffa345; border-radius: 9px;
+    background: #272522;
+}
+#collectorPanel {
+    display: block; box-sizing: content-box; width: calc(100% - 2px); max-width: 798px; height: 1px; margin: 0 auto;
+    border: 1px solid #50545c; border-top: 3px solid #70bdf4; border-radius: 9px; background: #1d1f23;
+}
+body[data-active-tool="collector"] { background: #1c1c1d; }
+body[data-active-tool="export"] { background: #1c1c1d; }
+#exportPanel .section-label { color: #ffc078; }
+#exportPanel h2 { color: #edf2f7; }
+#exportPanel { background: #23262b; border-color: #50545c; border-top-color: #ffc078; }
+#exportPanel .card { background: #292c31; border-color: #50545c; }
+#exportPanel .small-note { color: #c3c8d0; }
+#exportPanel #categoryDestinationNote { color: #ffc078; }
+#exportPanel #exportButton { background: linear-gradient(110deg, #ffb467, #ff7b2c); color: #291b0c; }
+#exportPanel .path-box, #exportPanel .selection-list { background: #202226; border-color: #565c66; }
+#exportTab[aria-selected="true"] { background: linear-gradient(110deg, #ffb467, #ff7b2c); border-color: #ffb467; color: #291b0c; }
+#collectorTab[aria-selected="true"] { background: linear-gradient(110deg, #9ed7ff, #54a7ed); border-color: #9ed7ff; color: #102432; }
+.plugin-tabs [aria-selected="true"]::after { border-top-color: #ff9749; }
+#collectorTab[aria-selected="true"]::after { border-top-color: #79bff6; }
+/* Compact export workflow */
+#exportPanel [hidden] { display: none !important; }
+#exportPanel .destination-heading, #exportPanel .compact-export-settings, #exportPanel .backup-action-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 20px; }
+#exportPanel .destination-heading label { font-weight: 600; }
+#exportPanel .destination-heading { gap: 10px; }
+#exportPanel .destination-heading > label, #exportPanel .destination-heading > select { flex-shrink: 0; }
+#exportPanel .destination-heading .folder-action-line { flex: 1 1 230px; min-width: 0; }
+#exportPanel .destination-heading #chooseFolderButton { flex: 0 0 auto; width: auto; min-width: 0; padding: 7px 10px; white-space: nowrap; }
+#backupDestinationSelect { background: #1d2025; color: #edf2f7; border: 1px solid #50545c; border-radius: 7px; padding: 6px 22px 6px 9px; font: inherit; font-size: 12px; }
+#exportPanel .folder-action-line { display: flex; align-items: center; gap: 12px; }
+#exportPanel #exportPath { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: #c3c8d0; overflow-wrap: anywhere; font-size: 9px; line-height: 1.35; }
+#exportPanel .setting-group { border: 0; padding: 0; background: transparent; }
+#exportPanel .export-format-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 12px; }
+#exportPanel .export-format-row .setting-group { flex-wrap: nowrap; gap: 8px; padding: 9px 10px; border: 1px solid #405873; border-radius: 12px; background: rgba(255,255,255,0.025); white-space: nowrap; }
+#exportPanel .export-format-row .setting-group.audio { border-color: #3c6150; }
+#exportPanel .track-row { margin: 0; }
+#exportPanel summary { cursor: pointer; color: #c3c8d0; padding: 8px 0; font-size: 13px; }
+#exportPanel details > .stack, #exportPanel details > .row { margin-top: 12px; }
+#exportPanel .advanced-export-settings { border-top: 1px solid #42464e; padding-top: 6px; }
+#exportPanel .backup-action-row { align-items: flex-start; }
+#exportPanel #exportButton { min-width: 130px; }
+#exportPanel .selection-list-button-group { flex-wrap: wrap; }
 </style>
 <script src="js/CSInterface.js"></script>
 <script src="js/main.js"></script>
+<script src="js/tabs.js"></script>
 </head>
-<body>
+<body data-active-tool="export">
+<nav class="plugin-tabs" role="tablist" aria-label="Tools">
+    <button id="exportTab" role="tab" aria-selected="true" aria-controls="exportPanel" onclick="selectPluginTab('export')">Export Backup</button>
+    <button id="collectorTab" role="tab" aria-selected="false" aria-controls="collectorPanel" onclick="selectPluginTab('collector')">Project Collector</button>
+</nav>
+<div id="exportPanel" role="tabpanel" aria-labelledby="exportTab">
 <div class="app">
     <section class="card stack">
         <div>
@@ -695,78 +805,70 @@ button:disabled {
                 <div class="header-actions">
                     <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh</button>
                     <button id="updateButton" class="secondary" onclick="runGithubUpdate()">Version ...</button>
-                    <button id="toggleQueueBackupSectionButton" class="text-toggle" onclick="toggleQueueBackupSection()">Hide</button>
                 </div>
-            </div>
-            <div class="queue-section-heading">
-                <h2>Queue Backup Exports</h2>
             </div>
         </div>
 
         <div id="queueBackupSectionContent" class="stack">
-            <div class="track-row">
-                <label for="exportVideoTrackInput">BACKUP TO</label>
-                <div class="track-stepper">
-                    <button id="decrementBackupTrackButton" class="track-step-button" type="button" title="Lower backup track">-</button>
-                    <input id="exportVideoTrackInput" type="number" min="1" value="5">
-                    <button id="incrementBackupTrackButton" class="track-step-button" type="button" title="Higher backup track">+</button>
-                </div>
-                <span class="track-choice-separator">or</span>
-                <label class="option compact-option" title="Choose the lowest empty video track automatically. If no empty video track exists, ExportBackup creates a new empty top video track.">
-                    <input type="checkbox" id="autoEmptyBackupTrackCheckbox">
-                    <span>TO EMPTY TRACK</span>
-                </label>
-            </div>
-
-            <div class="small-note">Turn off any <strong>soloed audio tracks</strong> before export. <strong>Re-backup</strong> ignores the queue checkboxes, uses original-track audio only, and restores backup clips to their recorded positions. <strong>Align Existing</strong> also recovers completed <code>_REBKP_TEMP</code> files when old media could not be replaced. Use <strong>Merge Selection</strong> after ticking audio tracks you want grouped together.</div>
-
-            <div class="settings-strip">
-                <div class="setting-group export">
-                    <span class="setting-label">Export With</span>
-                    <label class="option">
-                        <input type="checkbox" id="exportModePremiere" value="premiere">
-                        <span>Premiere</span>
-                    </label>
-                    <label class="option">
-                        <input type="checkbox" id="exportModeMediaEncoder" value="mediaEncoder" checked>
-                        <span>Media&nbsp;Encoder</span>
-                    </label>
-                </div>
-
-                <div class="setting-group audio">
-                    <label class="option">
-                        <input type="checkbox" id="audioFormatMp3" value="mp3" checked>
-                        <span>MP3</span>
-                    </label>
-                    <label class="option">
-                        <input type="checkbox" id="audioFormatWav" value="wav">
-                        <span>WAV</span>
-                    </label>
+            <div class="destination-heading">
+                <label for="backupDestinationSelect">Path</label>
+                <select id="backupDestinationSelect">
+                    <option value="ftp">FTP / Category</option>
+                    <option value="projectRoot">Project Root</option>
+                    <option value="manual">Manual Path</option>
+                </select>
+                <div class="action-line folder-action-line">
+                    <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()" hidden>Choose Path</button>
+                    <div class="path-box action-value value-text" id="exportPath">Resolving from the Premiere project...</div>
                 </div>
             </div>
+            <div hidden>
+                <input type="radio" id="backupDestinationFtp" name="backupDestination" value="ftp" checked>
+                <input type="radio" id="backupDestinationProjectRoot" name="backupDestination" value="projectRoot">
+                <input type="radio" id="backupDestinationManual" name="backupDestination" value="manual">
+            </div>
+            <div id="categoryDestinationNote" class="small-note" aria-live="polite" hidden></div>
+
         </div>
-
         <div class="stack">
-            <div class="section-label">Queue Preview</div>
-            <div class="row nowrap">
+            <div class="section-label" style="margin-top: 16px;">Tracks to back up</div>
+            <div class="track-warning">Before exporting, turn off <strong>Solo</strong> on all audio tracks.</div>
+            <div class="compact-export-settings">
+                <div class="track-row">
+                    <label for="exportVideoTrackInput">IMPORT TO</label>
+                    <div class="track-stepper">
+                        <button id="decrementBackupTrackButton" class="track-step-button" type="button" title="Lower import track">-</button>
+                        <input id="exportVideoTrackInput" type="number" min="1" value="5">
+                        <button id="incrementBackupTrackButton" class="track-step-button" type="button" title="Higher import track">+</button>
+                    </div>
+                    <label class="option compact-option" title="Use the lowest empty video track, creating one if needed.">
+                        <input type="checkbox" id="autoEmptyBackupTrackCheckbox"><span>EMPTY TRACK</span>
+                    </label>
+                </div>
+            </div>
+            <div id="exportSelectionList" class="selection-list"><div class="small-note">Refresh to load tracks.</div></div>
+            <div class="backup-action-row">
                 <button id="exportButton" onclick="runExport(false)">Backup</button>
                 <button id="rebackupButton" class="secondary" onclick="runExport(true)">Re-backup</button>
                 <button id="alignFolderButton" class="secondary" onclick="alignExistingFolder()">Align Existing</button>
             </div>
-            <div class="track-warning">IF HAVE SOLO TRACK: UNCHECK TO EXPORT</div>
-            <div id="exportSelectionList" class="selection-list">
-                <div class="small-note">Refresh to load tracks.</div>
-            </div>
         </div>
-
-        <div class="action-line folder-action-line">
-            <button id="chooseFolderButton" class="secondary" onclick="chooseExportFolder()">Choose Folder</button>
-            <div class="path-box action-value value-text" id="exportPath">No folder selected yet.</div>
-        </div>
-        <div class="preset-toggle-row">
-            <button id="togglePresetSectionButton" class="text-toggle" onclick="togglePresetSection()">Change Export Presets</button>
-        </div>
-
+        <details class="advanced-export-settings" open>
+            <summary>More settings</summary>
+            <div class="stack">
+                <div class="export-format-row">
+                <div class="setting-group export">
+                    <span class="setting-label">Export With</span>
+                    <label class="option"><input type="checkbox" id="exportModePremiere" value="premiere"><span>Premiere</span></label>
+                    <label class="option"><input type="checkbox" id="exportModeMediaEncoder" value="mediaEncoder" checked><span>Media Encoder</span></label>
+                </div>
+                <div class="setting-group audio">
+                    <span class="setting-label">Audio</span>
+                    <label class="option"><input type="checkbox" id="audioFormatMp3" value="mp3" checked><span>MP3</span></label>
+                    <label class="option"><input type="checkbox" id="audioFormatWav" value="wav"><span>WAV</span></label>
+                </div>
+                </div>
+                <button id="togglePresetSectionButton" class="text-toggle" onclick="togglePresetSection()">Change Export Presets</button>
         <div id="presetSection" class="stack">
             <div class="action-line">
                 <button id="chooseVideoPresetButton" class="preset-button" onclick="chooseVideoPreset()">Video Preset</button>
@@ -790,15 +892,13 @@ button:disabled {
                 <span>Remove sequence markers</span>
             </label>
             <label class="option">
-                <input type="checkbox" id="copyProjectFileCheckbox">
-                <span>Copy project file</span>
-            </label>
-            <label class="option">
                 <input type="checkbox" id="alignSortProjectFilesCheckbox">
                 <span>Sort project files</span>
             </label>
         </div>
 
+            </div>
+        </details>
     </section>
 
     <section class="card stack">
@@ -833,5 +933,7 @@ button:disabled {
         </div>
     </div>
 </div>
+</div>
+<iframe id="collectorPanel" role="tabpanel" aria-labelledby="collectorTab" title="Project Collector" scrolling="no" hidden></iframe>
 </body>
 </html>

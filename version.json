@@ -1,5 +1,5 @@
 {
-  "version": "4.4.0",
+  "version": "4.7.0",
   "channel": "main",
-  "notes": "Release 4.4.0 makes Re-backup locate existing backup media and recorded timeline positions from the live sequence, keeps unchecked MP4/audio items untouched, restores selected files through automatic alignment, retries temporarily locked old files after 10 and 20 seconds, and removes recovery JSON after alignment and cleanup finish."
+  "notes": "Release 4.7.0 renames the panel Backup Project, adds Collector sequence tabs and automatic Premiere track-lock refresh, simplifies destination controls, and fixes existing-backup discovery, re-backup, alignment cleanup, and Project Root exports into BACKUP."
 }

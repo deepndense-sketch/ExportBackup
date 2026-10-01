@@ -4,6 +4,96 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+test('Align Existing discovers old exports and merged-track leftovers without touching unrelated media', async () => {
+    const folder = fs.mkdtempSync(path.join(require('node:os').tmpdir(),'backup-cleanup-'));
+    try {
+        const names = ['Show_BACKUP.mp4','Show_Track3-4.wav','Show_BACKUP_REBKP_OLD_123_1.mp4',
+            'Show_Track3_REBKP_OLD_123_2.wav','Show_Track3.wav','Show_Track4.wav',
+            'Other_Track3.wav','Show_Track5.wav','Show_Track3-4_REBKP_TEMP.wav','source.png'];
+        names.forEach(name => fs.writeFileSync(path.join(folder,name),'ready'));
+        const source = fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
+        const key = file => path.resolve(file).toLowerCase();
+        const context = vm.createContext({fs,path,getPathComparisonKey:key,parseHostResult:JSON.parse,escapeForEvalScript:value => value,
+            deleteLocalFileNow:file => {fs.unlinkSync(file);return {ok:true};},
+            callHost:async () => JSON.stringify({ok:true,safePaths:names.filter(name => name !== 'Show_Track4.wav').map(name => path.join(folder,name))})});
+        vm.runInContext(source.slice(source.indexOf('function findBackupLeftovers('),source.indexOf('async function prepareAlignExistingCleanup(')),context);
+        const info = {videoPath:path.join(folder,'Show_BACKUP.mp4'),audio:[{path:path.join(folder,'Show_Track3-4.wav')}]};
+        const candidates = context.findBackupLeftovers(info);
+        assert.equal(candidates.length,5);
+        const result = await context.cleanupDiscoveredBackupLeftovers(info);
+        assert.equal(result.deleted.length,4);
+        assert.deepEqual(Array.from(result.retained),[path.join(folder,'Show_Track4.wav')]);
+        for (const name of ['Show_BACKUP.mp4','Show_Track3-4.wav','Other_Track3.wav','Show_Track5.wav','source.png','Show_Track4.wav']) assert.ok(fs.existsSync(path.join(folder,name)));
+        assert.equal(context.findBackupLeftovers(info).length,1);
+    } finally { fs.rmSync(folder,{recursive:true,force:true}); }
+});
+
+test('leftover project-item release never removes media still used by another sequence', () => {
+    const {context} = loadHostLogic();
+    const sequence = makeTimedSequence([makeTrack(0,[makeTimedClip('Old.wav',60,'D:/Show_Track3.wav')])]);
+    context.app.project.sequences = makeCollection([sequence],'numSequences');
+    const released = [];
+    context.ebReleaseProjectItemsByMediaPath = file => {released.push(file);return {remaining:0};};
+    const result = JSON.parse(context.exportBackup.releaseUnusedBackupLeftovers(JSON.stringify(['D:/Show_Track3.wav','D:/Show_BACKUP_REBKP_OLD_1.mp4'])));
+    assert.equal(result.ok,true);
+    assert.deepEqual(result.retainedPaths,['D:/Show_Track3.wav']);
+    assert.deepEqual(released,['D:/Show_BACKUP_REBKP_OLD_1.mp4']);
+});
+
+test('Project Root previews and creates a BACKUP subfolder beside the project', async () => {
+    const source = fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
+    const created = [];
+    const context = vm.createContext({path:path.win32,
+        fs:{mkdirSync:(folder,options) => created.push({folder,recursive:options.recursive}),existsSync:() => false},
+        BACKUP_DESTINATION_PROJECT_ROOT:'projectRoot',BACKUP_DESTINATION_MANUAL:'manual',
+        getSelectedBackupDestination:() => 'projectRoot',
+        getActiveProjectInfo:async () => ({ok:true,projectPath:'D:\\Edits\\Show.prproj'}),
+        updateCategoryDestinationNote() {}});
+    vm.runInContext(source.slice(source.indexOf('async function resolveProjectBackupFolder('),source.indexOf('async function refreshResolvedBackupDestination(')),context);
+    assert.equal((await context.resolveProjectBackupFolder({create:false})).folderPath,'D:\\Edits\\BACKUP');
+    assert.equal(created.length,0);
+    assert.equal((await context.resolveProjectBackupFolder({create:true})).folderPath,'D:\\Edits\\BACKUP');
+    assert.deepEqual(created,[{folder:'D:\\Edits\\BACKUP',recursive:true}]);
+});
+
+test('destination dropdown selects the existing routing mode and only offers browsing for manual paths', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const elements = {};
+    for (const id of ['backupDestinationFtp','backupDestinationProjectRoot','backupDestinationManual','backupDestinationSelect','chooseFolderButton','exportPath']) {
+        elements[id] = {checked:id === 'backupDestinationFtp', events:{}, addEventListener(name, fn) {this.events[name]=fn;}, dispatchEvent(event) {return this.events[event.type]();}};
+    }
+    const context = vm.createContext({document:{getElementById:id => elements[id]},
+        Event:class {constructor(type) {this.type=type;}}, localStorage:{setItem() {}},
+        BACKUP_DESTINATION_FTP:'ftp', BACKUP_DESTINATION_PROJECT_ROOT:'projectRoot', BACKUP_DESTINATION_MANUAL:'manual',
+        BACKUP_DESTINATION_STORAGE_KEY:'destination', manualExportFolder:'D:/Manual', exportFolder:null,
+        refreshResolvedBackupDestination:async () => context.updateDestinationButtonLabel()});
+    for (const name of ['getBackupDestinationInputs','getSelectedBackupDestination','updateDestinationButtonLabel','bindBackupDestinationInputs']) {
+        vm.runInContext(source.match(new RegExp('^function ' + name + '\\([^\\n]*\\).*?^}', 'ms'))[0],context);
+    }
+    context.bindBackupDestinationInputs();
+    for (const mode of ['manual','projectRoot','ftp']) {
+        elements.backupDestinationSelect.value=mode;
+        elements.backupDestinationSelect.events.change();
+        assert.equal(context.getSelectedBackupDestination(),mode);
+        assert.equal(elements.chooseFolderButton.hidden,mode !== 'manual');
+    }
+});
+
+// Give older layout fixtures explicit whole-sequence timing.
+function completeBackupFixture(sequence) {
+    if (sequence.end === undefined) sequence.end = String(60 * 254016000000);
+    for (const tracks of [sequence.audioTracks, sequence.videoTracks]) {
+        if (!tracks) continue;
+        for (let i = 0; i < tracks.numTracks; i++) {
+            for (let j = 0; j < tracks[i].clips.numItems; j++) {
+                const clip = tracks[i].clips[j];
+                if (!clip.start) clip.start = { seconds: 0 };
+                if (!clip.end) clip.end = { seconds: 60 };
+            }
+        }
+    }
+}
+
 function makeCollection(items, countProperty) {
     const collection = {};
 
@@ -44,6 +134,24 @@ function makeTrack(initialMute, clips, name) {
         get muteValue() {
             return muted;
         }
+    };
+}
+
+function makeTimedClip(name, seconds, mediaPath) {
+    return {
+        start: { seconds: 0 }, end: { seconds },
+        projectItem: { name, getMediaPath() { return mediaPath || ''; } }
+    };
+}
+
+function makeTimedSequence(audioTracks, videoTracks, name) {
+    return {
+        name: name || 'Current Show',
+        end: String(60 * 254016000000),
+        getInPoint() { return 0; },
+        getOutPoint() { return 60; },
+        audioTracks: makeCollection(audioTracks, 'numTracks'),
+        videoTracks: makeCollection(videoTracks || [makeTrack(0)], 'numTracks')
     };
 }
 
@@ -92,16 +200,244 @@ function loadHostLogic(appOverrides, contextOverrides) {
     return { context, source };
 }
 
+test('renamed sequences retain existing backup paths and exclude their audio outputs', () => {
+    const sequence = makeTimedSequence([
+        makeTrack(0,[makeTimedClip('Voice.wav',60,'D:/Voice.wav')]),
+        makeTrack(0,[makeTimedClip('Old_BACKUP.mp4',60,'D:/Backups/Old_BACKUP.mp4')]),
+        makeTrack(0,[makeTimedClip('Old_Track1.wav',60,'D:/Backups/Old_Track1.wav')])
+    ],[makeTrack(0,[makeTimedClip('Old_BACKUP.mp4',60,'D:/Backups/Old_BACKUP.mp4')])], 'Renamed without category');
+    const {context} = loadHostLogic();
+    context.app.project.activeSequence = sequence;
+    const layout = JSON.parse(context.exportBackup.getActiveBackupLayout()).layout;
+    assert.match(layout.video.mediaPath, /Old_BACKUP\.mp4$/);
+    assert.equal(layout.baseName,'old');
+    const preview = JSON.parse(context.exportBackup.getExportSelectionInfo());
+    assert.deepEqual(preview.items.filter(item => item.kind === 'audio').map(item => item.trackNumber),[1]);
+    const outputs = context.ebBuildRequestedOutputFiles(sequence,'D:/Backups','video.epr','audio.epr','wav',JSON.stringify({includeVideo:true,audioTracks:[1],replaceAudioLayout:true}),true,layout);
+    assert.equal(outputs.length,2);
+    assert.ok(outputs.every(output => /Old_(BACKUP|Track1)/.test(output.finalPath)));
+});
+
+test('project-bin-only backups are discovered by exact sequence identity', () => {
+    const {context} = loadHostLogic();
+    context.app.project.activeSequence = makeTimedSequence([makeTrack(0,[makeTimedClip('Voice.wav',60)])],[], 'Show');
+    context.app.project.rootItem.children = makeCollection([
+        {children:makeCollection([],'numItems'),getMediaPath:() => 'D:/Existing/Show_BACKUP.mp4'},
+        {children:makeCollection([],'numItems'),getMediaPath:() => 'E:/Audio/Show_Track1.wav'},
+        {getMediaPath:() => 'D:/Other/Other_BACKUP.mp4'}
+    ],'numItems');
+    const result = JSON.parse(context.exportBackup.getActiveBackupLayout());
+    assert.equal(result.ok,true);
+    assert.match(result.layout.video.mediaPath,/Show_BACKUP.mp4$/);
+    assert.equal(result.layout.audioOutputs.length,1);
+    assert.match(result.layout.audioOutputs[0].mediaPath,/Show_Track1.wav$/);
+});
+
+test('removing backup video still discovers its family from remaining audio and sibling files', () => {
+    const backupFolder = {exists:true,fsName:'D:/Existing',getFiles:() => [
+        {exists:true,name:'Old_BACKUP.mp4',fsName:'D:/Existing/Old_BACKUP.mp4'},
+        {exists:true,name:'Other_BACKUP.mp4',fsName:'D:/Existing/Other_BACKUP.mp4'}
+    ]};
+    const {context} = loadHostLogic(null, {File:function(filePath) {
+        this.fsName = String(filePath).replace(/\//g,'\\');
+        this.name = this.fsName.split('\\').pop();
+        this.exists = true;
+        this.parent = backupFolder;
+    }});
+    const sequence = makeTimedSequence([
+        makeTrack(0,[makeTimedClip('Voice.wav',60,'D:/Source/Voice.wav')]),
+        makeTrack(0,[makeTimedClip('Old_Track1.wav',60,'D:/Existing/Old_Track1.wav')])
+    ],[makeTrack(0)],'Renamed sequence');
+    context.app.project.activeSequence=sequence;
+    const result=JSON.parse(context.exportBackup.getActiveBackupLayout());
+    assert.equal(result.ok,true);
+    assert.equal(result.layout.baseName,'old');
+    assert.match(result.layout.video.mediaPath,/Old_BACKUP.mp4$/);
+    assert.equal(result.layout.audioOutputs[0].targetTrackNumber,2);
+    const preview=JSON.parse(context.exportBackup.getExportSelectionInfo());
+    assert.deepEqual(preview.items.filter(item => item.kind === 'audio').map(item => item.trackNumber),[1]);
+    const outputs=context.ebBuildRequestedOutputFiles(sequence,'D:/Existing','video.epr','audio.epr','wav',JSON.stringify({includeVideo:true,audioTracks:[1],replaceAudioLayout:true}),true,result.layout);
+    assert.equal(outputs.length,2);
+    assert.ok(outputs.every(output => /Old_(BACKUP|Track1)/.test(output.finalPath)));
+});
+
+test('Re-backup bypasses new destination routing and Backup reports existing files first', async () => {
+    const source = fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
+    const context = vm.createContext({parseHostResult:JSON.parse,path:path.win32,fs:{existsSync:() => true},ensureHostLoaded:async () => true,
+        callHost:async () => JSON.stringify({ok:true,layout:{video:{mediaPath:'D:/Existing/Old_BACKUP.mp4'}}}),
+        resolveProjectBackupFolder:() => {throw new Error('Destination naming must not run');}});
+    vm.runInContext(source.slice(source.indexOf('async function resolveExportActionDestination('),source.indexOf('async function runExport(')),context);
+    assert.equal((await context.resolveExportActionDestination(true)).folderPath,'D:/Existing');
+    await assert.rejects(context.resolveExportActionDestination(false),/Backup files already exist/);
+    context.callHost=async () => JSON.stringify({ok:true,layout:{audioOutputs:[]}});
+    await assert.rejects(context.resolveExportActionDestination(true),/No existing backup files/);
+});
+
+test('Align Existing bypasses destination naming and passes discovered paths to alignment', async () => {
+    const source = fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
+    let aligned;
+    const existing = {sequenceName:'No category',layout:{baseName:'old',video:{mediaPath:'D:/Old_BACKUP.mp4',targetTrackNumber:4},audioOutputs:[{mediaPath:'E:/Old_Track1.wav',sourceTrackNumber:1,sourceTrackNumbers:[1]}]}};
+    const context=vm.createContext({busy:false,exportFolder:null,alignFolder:null,DEFAULT_BACKUP_VIDEO_TRACK:5,
+        stopPendingCleanupRetry:async () => {}, resolveExportActionDestination:async (flag) => {assert.equal(flag,true); return {folderPath:'D:/',existingBackup:existing};},
+        resolveProjectBackupFolder:() => {throw new Error('FTP validation must not run');},
+        readManifestForSequence:() => null, getPositiveIntValue:() => 5, updateAlignFolder() {},
+        document:{getElementById:() => ({})},alert:message => assert.fail(message),setStatus() {},
+        runAlignmentFlow:async (folder,options) => {aligned={folder,options};}});
+    vm.runInContext(source.slice(source.indexOf('async function alignExistingFolder()'),source.indexOf('document.addEventListener("DOMContentLoaded"')),context);
+    await context.alignExistingFolder();
+    assert.equal(aligned.folder,'D:/');
+    assert.equal(aligned.options.manifestOnly,true);
+    assert.deepEqual(Array.from(aligned.options.manifest.expectedFiles,entry => entry.path),['D:/Old_BACKUP.mp4','E:/Old_Track1.wav']);
+});
+
+test('mixed source tracks remain selectable, audible, and untouched by backup cleanup', () => {
+    const source = makeTimedClip('WOW 1900 The Apology of Socrates_BACKUP.mp4', 7.274,
+        'D:/LocalTests/WOW 1900 The Apology of Socrates_BACKUP.mp4');
+    const track = makeTrack(0, [source, makeTimedClip('Dialogue.wav', 10)]);
+    let removals = 0;
+    source.remove = () => { removals++; };
+    const sequence = makeTimedSequence([track]);
+    const { context } = loadHostLogic();
+    context.app.project.activeSequence = sequence;
+    context.seq = sequence;
+    context.paths = [source.projectItem.getMediaPath()];
+    const queue = JSON.parse(context.exportBackup.getExportSelectionInfo());
+    assert.deepEqual(queue.items.map(item => item.label), ['Backup MP4', 'Track 1']);
+    assert.equal(queue.items[0].selected, true);
+    assert.equal(vm.runInContext('ebFindBackupCandidates(seq, seq.name).length', context), 0);
+    vm.runInContext('ebApplyManagedTrackMutePolicy(seq, seq.name)', context);
+    assert.equal(track.muteValue, 0);
+    vm.runInContext('ebRemoveManagedClipsFromAllAudioTracks(seq, seq.name, "backup", 0, paths)', context);
+    assert.equal(removals, 0);
+});
+
+test('short clips, unknown timing, and stale track labels cannot establish backup ownership', () => {
+    const sequence = makeTimedSequence([
+        makeTrack(0, [makeTimedClip('Current Show_BACKUP.mp4', 7)]),
+        makeTrack(0, [makeTimedClip('Current Show_Track1.wav', 10)]),
+        makeTrack(0, [{ projectItem: { name: 'Current Show_BACKUP.mp4' } }]),
+        makeTrack(0, [], 'Current Show_BACKUP')
+    ]);
+    const { context } = loadHostLogic();
+    context.app.project.activeSequence = sequence;
+    context.seq = sequence;
+    assert.equal(vm.runInContext('ebFindBackupCandidates(seq, seq.name).length', context), 0);
+    const queue = JSON.parse(context.exportBackup.getExportSelectionInfo());
+    assert.deepEqual(queue.items.map(item => item.label), ['Backup MP4', 'Track 1', 'Track 2', 'Track 3']);
+});
+
+test('renamed whole-sequence backups are candidates and selected Re-backup preserves their paths', () => {
+    const sequence = makeTimedSequence([
+        makeTrack(0, [makeTimedClip('Old Show_BACKUP.mp4', 60, 'D:/LocalTests/Old Show_BACKUP.mp4')]),
+        makeTrack(0, [makeTimedClip('Old Show_Track1-2.wav', 60, 'D:/LocalTests/Old Show_Track1-2.wav')])
+    ], [makeTrack(0, [makeTimedClip('Old Show_BACKUP.mp4', 60, 'D:/LocalTests/Old Show_BACKUP.mp4')]), makeTrack(0)]);
+    const { context } = loadHostLogic();
+    context.app.project.activeSequence = sequence;
+    context.seq = sequence;
+    const candidates = JSON.parse(vm.runInContext('JSON.stringify(ebFindBackupCandidates(seq, seq.name))', context));
+    assert.equal(candidates.length, 3);
+    assert.equal(candidates[0].name, 'Old Show_BACKUP.mp4');
+    assert.equal(candidates[0].exactName, false);
+    assert.equal(candidates[0].timelineTrack, 'V1');
+    const layout = JSON.parse(vm.runInContext('JSON.stringify(ebCaptureRebackupLayout(seq, seq.name, 1))', context));
+    assert.match(layout.video.mediaPath, /Old Show_BACKUP\.mp4$/);
+    assert.equal(layout.backupAudio.targetTrackNumber, 1);
+    assert.deepEqual(layout.audioOutputs[0].sourceTrackNumbers, [1, 2]);
+});
+
+test('duration detection handles sequence ticks and an export range shorter than the full sequence', () => {
+    const sequence = makeTimedSequence([
+        makeTrack(0, [makeTimedClip('Current Show_Track1.wav', 60)]),
+        makeTrack(0, [makeTimedClip('Current Show_Track2.wav', 20)])
+    ]);
+    sequence.getInPoint = () => 10;
+    sequence.getOutPoint = () => 30;
+    const { context } = loadHostLogic();
+    context.seq = sequence;
+    assert.equal(vm.runInContext('ebGetSequenceFullDurationSeconds(seq)', context), 60);
+    assert.equal(vm.runInContext('ebFindBackupCandidates(seq, seq.name).length', context), 2);
+    delete sequence.getInPoint;
+    delete sequence.getOutPoint;
+    assert.equal(vm.runInContext('ebFindBackupCandidates(seq, seq.name).length', context), 1);
+});
+
+test('normal validation warns for project candidates but blocks only real output files', () => {
+    const sequence = makeTimedSequence([
+        makeTrack(0, [makeTimedClip('Old Show_Track1.wav', 60, 'D:/LocalTests/Old Show_Track1.wav')])
+    ]);
+    const existingFiles = new Set();
+    const { context } = loadHostLogic(undefined, {
+        File: function(filePath) {
+            this.fsName = String(filePath).replace(/\//g, '\\');
+            this.name = this.fsName.split('\\').pop();
+            this.exists = /\.epr$/.test(this.fsName) || existingFiles.has(this.fsName);
+        }
+    });
+    context.app.project.activeSequence = sequence;
+    const requestedPath = 'D:\\LocalTests\\Current Show_BACKUP.mp4';
+    context.app.project.rootItem.children = makeCollection([{
+        name: 'Current Show_BACKUP.mp4', getMediaPath() { return requestedPath; }
+    }], 'numItems');
+    const validate = () => JSON.parse(context.exportBackup.validateBackupExportSettings(
+        1, 'D:/LocalTests', 'video.epr', 'mp3.epr', 'wav.epr', 'wav',
+        JSON.stringify({ includeVideo: true, audioTracks: [] }), false, false
+    ));
+    let result = validate();
+    assert.equal(result.ok, true);
+    assert.equal(result.backupCandidates[0].name, 'Old Show_Track1.wav');
+    assert.equal(result.projectReferences[0].path, requestedPath);
+    existingFiles.add(requestedPath);
+    result = validate();
+    assert.equal(result.ok, false);
+    assert.equal(result.hasConflicts, true);
+    assert.equal(result.conflicts[0].path, requestedPath);
+});
+
+test('alignment cleanup removes only a standalone replacement path, preserving other named backups', () => {
+    const old = makeTimedClip('Old Show_BACKUP.mp4', 60, 'D:/LocalTests/Old Show_BACKUP.mp4');
+    const current = makeTimedClip('Current Show_BACKUP.mp4', 60, 'D:/LocalTests/Current Show_BACKUP.mp4');
+    const tracks = [makeTrack(0, [old]), makeTrack(0, [current])];
+    old.remove = () => tracks[0].clips.removeItem(old);
+    current.remove = () => tracks[1].clips.removeItem(current);
+    const sequence = makeTimedSequence(tracks);
+    const { context } = loadHostLogic();
+    context.app.project.activeSequence = sequence;
+    context.seq = sequence;
+    context.paths = [current.projectItem.getMediaPath()];
+    assert.equal(vm.runInContext('ebRemoveManagedClipsFromAllAudioTracks(seq, seq.name, "backup", 0, paths)', context), 1);
+    assert.equal(tracks[0].clips.numItems, 1);
+    assert.equal(tracks[1].clips.numItems, 0);
+});
+
+test('candidate prompt names the actual media and honors both continue and cancel', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const start = source.indexOf('function confirmBackupCandidates(');
+    const end = source.indexOf('function formatExistingMediaMessage(', start);
+    let message = '';
+    let answer = false;
+    const context = vm.createContext({ confirm(value) { message = value; return answer; } });
+    vm.runInContext(source.slice(start, end), context);
+    const validation = { backupCandidates: [{ name: 'Old Show_BACKUP.mp4', path: 'D:/LocalTests/Old Show_BACKUP.mp4',
+        timelineTrack: 'V2', durationSeconds: 60, exactName: false }] };
+    assert.equal(context.confirmBackupCandidates(validation), false);
+    assert.match(message, /Old Show_BACKUP\.mp4/);
+    assert.match(message, /Continue with a new Backup/);
+    assert.doesNotMatch(message, /Media already exists/);
+    answer = true;
+    assert.equal(context.confirmBackupCandidates(validation), true);
+    assert.equal(context.confirmBackupCandidates({}), true);
+});
+
 test('Queue Backup Exports has a visual-only toggle and always starts shown', () => {
     const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
 
-    assert.match(html, /id="toggleQueueBackupSectionButton"[^>]*>Hide</);
+    assert.doesNotMatch(html, /id="toggleQueueBackupSectionButton"/);
     assert.match(html, /id="queueBackupSectionContent" class="stack"/);
     assert.doesNotMatch(html, /id="queueBackupSectionContent"[^>]*is-hidden/);
     assert.match(
         html,
-        /id="audioFormatWav"[\s\S]*?<\/div>\s*<\/div>\s*<div class="stack">\s*<div class="section-label">Queue Preview<\/div>/
+        /<div class="section-label"[^>]*>Tracks to back up<\/div>[\s\S]*<summary>More settings<\/summary>[\s\S]*id="audioFormatWav"/
     );
     assert.match(mainSource, /function toggleQueueBackupSection\(\)/);
     assert.match(
@@ -111,7 +447,7 @@ test('Queue Backup Exports has a visual-only toggle and always starts shown', ()
     assert.doesNotMatch(mainSource, /queueBackupSectionVisibleStorage/i);
 });
 
-test('Queue Preview omits app-managed backup audio layers', () => {
+test('Queue Preview keeps unrelated backup-named source tracks selectable', () => {
     const sourceTrack = makeTrack(0, [{ projectItem: { name: 'Dialogue.wav' } }]);
     const backupTrack = makeTrack(0, [{ projectItem: { name: 'OtherSequence_BACKUP_REBKP_TEMP.mp4' } }]);
     const managedAudioTrack = makeTrack(1, [{ projectItem: { name: 'AD_SM QUOTE No Pain Food_Track1.mp3' } }]);
@@ -139,11 +475,57 @@ test('Queue Preview omits app-managed backup audio layers', () => {
     assert.equal(result.ok, true);
     assert.deepEqual(
         Array.from(result.items, (item) => item.label),
-        ['Backup MP4', 'Track 1']
+        ['Backup MP4', 'Track 1', 'Track 2', 'Track 3']
     );
 });
 
-test('re-backup ignores other sequence backup names and finds the active sequence backup', () => {
+test('Queue Preview follows shifted source tracks and drops stale backup source mapping', () => {
+    const emptyA1 = makeTrack(0, []);
+    const shiftedSources = [2, 3, 4, 5].map((trackNumber) =>
+        makeTrack(
+            0,
+            [{ projectItem: { name: `Source A${trackNumber}.wav` } }],
+            trackNumber === 5 ? 'Scene_Track4' : `Audio ${trackNumber}`
+        )
+    );
+    const shiftedBackupVideo = makeTrack(0, [{
+        projectItem: {
+            name: 'Scene_BACKUP.mp4',
+            getMediaPath() { return 'E:\\Existing\\Scene_BACKUP.mp4'; }
+        }
+    }], 'Scene_BACKUP');
+    const shiftedOldAudio = makeTrack(0, [{
+        projectItem: {
+            name: 'Scene_Track1-4.mp3',
+            getMediaPath() { return 'E:\\Existing\\Scene_Track1-4.mp3'; }
+        }
+    }], 'Scene_Track1-4');
+    const sequence = {
+        name: 'Scene',
+        audioTracks: makeCollection([emptyA1].concat(shiftedSources, shiftedBackupVideo, shiftedOldAudio), 'numTracks'),
+        videoTracks: makeCollection([], 'numTracks')
+    };
+    completeBackupFixture(sequence);
+    const { context } = loadHostLogic({
+        project: {
+            activeSequence: sequence,
+            rootItem: { type: 2, children: makeCollection([], 'numItems') },
+            sequences: makeCollection([sequence], 'numSequences'),
+            save() {}
+        }
+    });
+
+    const result = JSON.parse(context.exportBackup.getExportSelectionInfo());
+    assert.equal(result.ok, true);
+    assert.deepEqual(
+        Array.from(result.items, (item) => item.label),
+        ['Backup MP4', 'Track 2', 'Track 3', 'Track 4', 'Track 5']
+    );
+    assert.equal(result.items[4].trackName, '');
+    assert.deepEqual(Array.from(result.audioGroups), []);
+});
+
+test('re-backup ignores unrelated names and a track label alone', () => {
     const sequence = {
         name: 'Scene',
         videoTracks: makeCollection([
@@ -161,9 +543,9 @@ test('re-backup ignores other sequence backup names and finds the active sequenc
         trackNameInfo: ebGetTrackSequenceManagedInfo(sequenceUnderTest.videoTracks[1], 'Scene')
     })`, context));
 
-    assert.equal(result.backupTrack, 2);
+    assert.equal(result.backupTrack, 0);
     assert.equal(result.otherSequenceInfo.hasBackup, false);
-    assert.equal(result.trackNameInfo.hasBackup, true);
+    assert.equal(result.trackNameInfo.hasBackup, false);
 });
 
 test('re-backup output paths follow existing backup media paths', () => {
@@ -179,6 +561,7 @@ test('re-backup output paths follow existing backup media paths', () => {
         ], 'numTracks')
     };
     const { context } = loadHostLogic();
+    completeBackupFixture(sequence);
     context.sequenceUnderTest = sequence;
 
     const result = JSON.parse(vm.runInContext(`JSON.stringify((() => {
@@ -430,6 +813,7 @@ test('re-backup audio format changes render selected format and release old audi
         ], 'numTracks')
     };
     const { context } = loadHostLogic();
+    completeBackupFixture(sequence);
     context.sequenceUnderTest = sequence;
 
     const result = JSON.parse(vm.runInContext(`JSON.stringify((() => {
@@ -470,6 +854,7 @@ test('re-backup respects unchecked backup video and checked audio items', () => 
         ], 'numTracks')
     };
     const { context } = loadHostLogic();
+    completeBackupFixture(sequence);
     context.sequenceUnderTest = sequence;
 
     const result = JSON.parse(vm.runInContext(`JSON.stringify((() => {
@@ -615,7 +1000,7 @@ test('empty renamed managed audio tracks do not count as existing backup media',
     })())`, context));
 
     assert.deepEqual(result.emptyConflicts, []);
-    assert.equal(result.managedSelection.trackNumbers['2'], true);
+    assert.equal(result.managedSelection.trackNumbers['2'], undefined);
 });
 
 test('video visibility is restored exactly after export-only hiding', () => {
@@ -824,6 +1209,7 @@ test('Re-backup recognizes its V track through a preserved media path', () => {
             save() {}
         }
     });
+    completeBackupFixture(sequence);
     context.sequenceUnderTest = sequence;
     context.targetPaths = [finalPath];
 
@@ -868,6 +1254,7 @@ test('Re-backup fallback inspects only the selected occupied video track', () =>
         audioTracks: makeCollection([], 'numTracks')
     };
     const { context } = loadHostLogic();
+    completeBackupFixture(sequence);
     context.sequenceUnderTest = sequence;
 
     assert.equal(
@@ -1246,10 +1633,10 @@ test('automatic alignment uses only files selected for the current export', () =
     assert.match(scannerSource, /if \(!manifestOnly\) \{\s*files\.forEach/);
     assert.match(recoverySource, /const manifestOnly = settings\.manifestOnly === true && !!manifest/);
     assert.match(recoverySource, /if \(!manifestOnly\) \{\s*fs\.readdirSync/);
-    assert.equal(automaticAlignmentCount, 2);
+    assert.equal(automaticAlignmentCount, 3);
     assert.match(
         mainSource,
-        /async function alignExistingFolder\(\)[\s\S]*?runAlignmentFlow\(exportFolder \|\| alignFolder, \{\s*skipVideo: false,\s*autoTriggered: false/
+        /async function alignExistingFolder\(\)[\s\S]*?runAlignmentFlow\(exportFolder \|\| alignFolder, \{\s*manifest,\s*manifestOnly: true,\s*skipVideo: false,\s*autoTriggered: false/
     );
 });
 
@@ -1348,14 +1735,12 @@ test('completion and import recovery messages use compact status text and visibl
     assert.doesNotMatch(mainSource, /function showDesktopResultWindow\(/);
 });
 
-test('normal backup reports existing backup media before empty-track errors', () => {
+test('normal Backup blocks disk collisions and requires an empty target', () => {
     const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
-    const existingMessageIndex = hostSource.indexOf('Backup files are already there. Use Re-backup.');
-    const emptyTrackIndex = hostSource.indexOf('ebValidateBackupTrack(sequence, backupVideoTrackNumber, true, sequenceBaseName);', existingMessageIndex);
-
-    assert.notEqual(existingMessageIndex, -1);
-    assert.notEqual(emptyTrackIndex, -1);
-    assert.ok(existingMessageIndex < emptyTrackIndex);
+    assert.doesNotMatch(hostSource, /Backup files are already there/);
+    assert.match(hostSource, /ebValidateBackupTrack\(sequence, backupVideoTrackNumber, false, sequenceBaseName\)/);
+    assert.match(hostSource, /backupCandidates: isRebackupMode/);
+    assert.doesNotMatch(hostSource, /conflicts = conflicts\.concat\(ebFindExistingProjectConflicts/);
 });
 
 test('automatic empty backup track option is visible and unchecked by default', () => {
@@ -1364,11 +1749,11 @@ test('automatic empty backup track option is visible and unchecked by default', 
 
     assert.match(html, /id="autoEmptyBackupTrackCheckbox"/);
     assert.doesNotMatch(html, /id="autoEmptyBackupTrackCheckbox" checked/);
-    assert.match(html, />TO EMPTY TRACK</);
-    assert.match(html, /BACKUP TO[\s\S]*id="decrementBackupTrackButton"[\s\S]*id="exportVideoTrackInput"[\s\S]*id="incrementBackupTrackButton"[\s\S]*class="track-choice-separator">or<\/span>[\s\S]*TO EMPTY TRACK/);
+    assert.match(html, />EMPTY TRACK</);
+    assert.match(html, /IMPORT TO[\s\S]*id="decrementBackupTrackButton"[\s\S]*id="exportVideoTrackInput"[\s\S]*id="incrementBackupTrackButton"[\s\S]*EMPTY TRACK/);
     assert.match(html, /class="action-line folder-action-line"[\s\S]*id="chooseFolderButton"[\s\S]*id="exportPath"[\s\S]*id="togglePresetSectionButton"[\s\S]*Change Export Presets[\s\S]*id="presetSection"/);
     assert.equal((html.match(/id="togglePresetSectionButton"/g) || []).length, 1);
-    assert.match(html, /id="refreshExportSelectionButton"[\s\S]*id="updateButton"[\s\S]*id="toggleQueueBackupSectionButton"/);
+    assert.match(html, /id="refreshExportSelectionButton"[\s\S]*id="updateButton"/);
     assert.match(mainSource, /function resetAutoEmptyBackupTrackOption\(\)/);
     assert.match(mainSource, /function bindAutoEmptyBackupTrackOption\(\)/);
     assert.match(mainSource, /function bindBackupTrackStepper\(\)/);
@@ -1437,7 +1822,7 @@ test('local cleanup uses same-process paths and cannot block successful alignmen
     assert.ok(alignPosition >= 0);
     assert.ok(cleanupPosition > alignPosition);
     assert.match(flowSource, /Backup files were imported and aligned successfully/);
-    assert.doesNotMatch(mainSource, /confirm\(/);
+    assert.doesNotMatch(deleteSource, /confirm\(/);
     assert.doesNotMatch(mainSource, /_cleanup/);
     assert.doesNotMatch(mainSource, /deleteLocalFileWithElevatedShell/);
 });
@@ -1586,10 +1971,10 @@ test('best-effort old-file cleanup reports EBUSY as pending instead of throwing'
 test('Align Existing removes sequence-managed backup clips before target-track emptiness check', () => {
     const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
 
-    assert.match(hostSource, /shouldRemove = ebIsManagedBackupClip\(clip, baseName\)/);
+    assert.match(hostSource, /mediaPath === ebNormalizeMediaPathForComparison\(replacementPaths\[p\]\)/);
     assert.match(
         hostSource,
-        /ebRemoveManagedClipsFromTrack\(sequence\.videoTracks\[resolvedBackupTrack - 1\], sequenceBaseName, "backup", 0\);[\s\S]*if \(videoPath && ebTrackHasClips\(sequence\.videoTracks\[resolvedBackupTrack - 1\]\)\)/
+        /ebRemoveManagedClipsFromTrack\(sequence\.videoTracks\[resolvedBackupTrack - 1\], sequenceBaseName, "backup", 0, \[videoPath\]\);[\s\S]*if \(videoPath && ebTrackHasClips\(sequence\.videoTracks\[resolvedBackupTrack - 1\]\)\)/
     );
 });
 
@@ -1645,4 +2030,249 @@ test('automatic backup track selection creates a new top video track when none a
     assert.equal(result, 3);
     assert.equal(sequence.videoTracks.numTracks, 3);
     assert.equal(sequence.videoTracks[2].clips.numItems, 0);
+});
+
+test('project-name routing finds a configured category and number anywhere and builds a canonical folder name', () => {
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const start = mainSource.indexOf('function parseBackupProjectName');
+    const end = mainSource.indexOf('function findFtpCategoryFolder', start);
+    const context = vm.createContext({
+        path,
+        getConfiguredBackupCategories() {
+            return ['BMD INTRO', 'DAILY NEWS SCROLLS', 'BMD', 'WOW', 'PE', 'HL'];
+        }
+    });
+    vm.runInContext(mainSource.slice(start, end), context);
+
+    const valid = vm.runInContext('parseBackupProjectName("WOW 3226 3227 Pierre Gassendi.prproj")', context);
+    const multiWord = vm.runInContext('parseBackupProjectName("BMD INTRO 91 Opening Headlines.prproj")', context);
+    const missingEpisode = vm.runInContext('parseBackupProjectName("WOW Pierre Gassendi.prproj")', context);
+    const numberOnly = vm.runInContext('parseBackupProjectName("PE 3226.prproj")', context);
+    const unknownCategory = vm.runInContext('parseBackupProjectName("NEWS 3226.prproj")', context);
+    const reversed = vm.runInContext('parseBackupProjectName("3226 WOW Pierre Gassendi.prproj")', context);
+    const embedded = vm.runInContext('parseBackupProjectName("Pierre 3226 WOW Gassendi.prproj")', context);
+
+    assert.equal(valid.ok, true);
+    assert.equal(valid.category, 'WOW');
+    assert.deepEqual(Array.from(valid.episodeNumbers), ['3226', '3227']);
+    assert.equal(multiWord.ok, true);
+    assert.equal(multiWord.category, 'BMD INTRO');
+    assert.equal(missingEpisode.ok, false);
+    assert.equal(numberOnly.ok, true);
+    assert.equal(unknownCategory.ok, false);
+    assert.equal(reversed.ok, true);
+    assert.equal(reversed.canonicalFolderName, 'WOW 3226 Pierre Gassendi');
+    assert.equal(embedded.ok, true);
+    assert.equal(embedded.canonicalFolderName, 'WOW 3226 Pierre Gassendi');
+});
+
+test('backup destination UI exposes FTP category routing, project root, and manual path', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+
+    assert.match(html, /id="backupDestinationFtp"[^>]*value="ftp"/);
+    assert.match(html, /id="backupDestinationProjectRoot"[^>]*value="projectRoot"/);
+    assert.match(html, /id="backupDestinationManual"[^>]*value="manual"/);
+    assert.match(html, /id="chooseFolderButton"[^>]*hidden>Choose Path<\/button>/);
+    assert.match(mainSource, /const FTP_BACKUP_ROOT = "Y:\\\\@ Backup"/);
+    assert.match(mainSource, /destinationMode === BACKUP_DESTINATION_MANUAL/);
+    assert.match(mainSource, /manualExportFolder = result\.data\[0\]/);
+    assert.match(mainSource, /else \{\s*parsedName = parseBackupProjectName/);
+    assert.match(mainSource, /normalizeBackupCategoryName\(entry\.name\) === category/);
+    assert.match(mainSource, /folderPath = path\.join\(categoryFolder, parsedName\.canonicalFolderName\)/);
+    assert.doesNotMatch(html, /id="projectNamePrompt"/);
+    assert.match(html, /id="categoryDestinationNote"/);
+    assert.doesNotMatch(html, /id="(?:categoryList|categoryNameInput|addCategoryButton|deleteCategoryButton)"/);
+    assert.doesNotMatch(mainSource, /"SM URGENT MESSAGES"/);
+    assert.doesNotMatch(mainSource, /"TRIBUTE"/);
+    assert.doesNotMatch(mainSource, /"QYP"/);
+    assert.match(mainSource, /BACKUP_CATEGORIES_STORAGE_KEY/);
+    assert.match(mainSource, /function addBackupCategory\(\)/);
+    assert.match(mainSource, /function deleteSelectedBackupCategory\(\)/);
+    assert.doesNotMatch(html, /id="changeRebackupAudioLayoutCheckbox"/);
+    assert.match(mainSource, /replaceAudioLayout: true/);
+    assert.match(mainSource, /await syncExportSelectionWithActiveTimeline\(\)/);
+    assert.match(mainSource, /function clearAudioMerges\(\)/);
+    assert.match(mainSource, /Array\.isArray\(selectionInfo\.audioGroups\)/);
+    assert.match(mainSource, /Clear Merges/);
+    assert.doesNotMatch(html, /Copy Existing Backups|id="copyExistingBackupsButton"/);
+    assert.match(mainSource, /async function copyExistingBackupsToResolvedLocation\(\)/);
+    assert.match(mainSource, /exportBackup\.getActiveBackupLayout\(\)/);
+    assert.match(mainSource, /findLegacyBackupForActiveSequence\(\\"\\", true\)/);
+    assert.doesNotMatch(mainSource, /Choose Folder Containing Existing Backup Files/);
+    assert.match(mainSource, /fs\.copyFileSync\(sourcePath, targetPath\)/);
+    assert.match(mainSource, /fs\.statSync\(sourcePath\)\.size !== fs\.statSync\(targetPath\)\.size/);
+    assert.match(mainSource, /A different backup file with the same name already exists at the destination/);
+});
+
+test('MAIN and INTRO projects share a number-only folder under an existing inclusive range container', () => {
+    const mainSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
+    const start = mainSource.indexOf('function getGroupedEpisodeRouting');
+    const end = mainSource.indexOf('async function resolveProjectBackupFolder', start);
+    const directoryNames = [
+        'WOW 3240-3251_Italy_19990522_SM PL',
+        'WOW 3252-3260_Other Group',
+        'PE 3240-3260_PE Group'
+    ];
+    const context = vm.createContext({
+        path,
+        fs: {
+            readdirSync() {
+                return directoryNames.map((name) => ({ name, isDirectory() { return true; } }));
+            }
+        }
+    });
+    vm.runInContext(mainSource.slice(start, end), context);
+    context.mainProject = { title: 'MAIN', episodeNumbers: ['3250'] };
+    context.introProject = { title: 'INTRO', episodeNumbers: ['3250'] };
+
+    const mainRoute = vm.runInContext('getGroupedEpisodeRouting(mainProject)', context);
+    const introRoute = vm.runInContext('getGroupedEpisodeRouting(introProject)', context);
+    const container = vm.runInContext(
+        'findEpisodeRangeContainer("Y:\\\\@ Backup\\\\@ WOW BACKUP", "WOW", 3250)',
+        context
+    );
+
+    assert.equal(mainRoute.enabled, true);
+    assert.equal(introRoute.enabled, true);
+    assert.equal(mainRoute.episodeNumber, introRoute.episodeNumber);
+    assert.equal(path.basename(container), 'WOW 3240-3251_Italy_19990522_SM PL');
+    assert.match(mainSource, /folderPath = path\.join\(rangeContainer, String\(groupedRouting\.episodeNumber\)\)/);
+    assert.doesNotMatch(mainSource, /groupedRouting\.episodeNumber <= 3240/);
+
+    assert.throws(
+        () => vm.runInContext('findEpisodeRangeContainer("Y:\\\\@ Backup\\\\@ WOW BACKUP", "WOW", 3300)', context),
+        /Please create the group root folder for the WOW project first/
+    );
+});
+
+test('changed Re-backup merge layout becomes authoritative and identifies old audio as obsolete', () => {
+    const { context } = loadHostLogic();
+    const sequence = {
+        audioTracks: makeCollection([
+            makeTrack(0, [{ projectItem: { name: 'Dialogue A1.wav' } }], 'Dialogue 1'),
+            makeTrack(0, [{ projectItem: { name: 'Dialogue A2.wav' } }], 'Dialogue 2')
+        ], 'numTracks')
+    };
+    context.sequenceUnderTest = sequence;
+    context.layoutUnderTest = {
+        audioOutputs: [
+            { sourceTrackNumber: 1, sourceTrackNumbers: [1], mediaPath: 'E:\\Backup\\Old_Track1.mp3', currentMediaPath: 'E:\\Backup\\Old_Track1.mp3' },
+            { sourceTrackNumber: 2, sourceTrackNumbers: [2], mediaPath: 'E:\\Backup\\Old_Track2.mp3', currentMediaPath: 'E:\\Backup\\Old_Track2.mp3' }
+        ]
+    };
+    context.selectionUnderTest = { audioTracks: [], audioGroups: [[1, 2]], replaceAudioLayout: true };
+
+    const definitions = JSON.parse(vm.runInContext(
+        'JSON.stringify(ebBuildSelectedRebackupAudioDefinitions(sequenceUnderTest, "Scene", selectionUnderTest, layoutUnderTest))',
+        context
+    ));
+    assert.deepEqual(definitions.map((entry) => entry.trackNumbers), [[1, 2]]);
+    assert.equal(definitions[0].mediaPath, '');
+
+    context.requestedUnderTest = [{ kind: 'audio', finalPath: 'E:\\Backup\\Scene_Track1-2.mp3', sourceMediaPath: '' }];
+    const obsolete = JSON.parse(vm.runInContext(
+        'JSON.stringify(ebGetObsoleteRebackupAudioFiles(layoutUnderTest, requestedUnderTest, true))',
+        context
+    ));
+    assert.deepEqual(obsolete, ['E:\\Backup\\Old_Track1.mp3', 'E:\\Backup\\Old_Track2.mp3']);
+});
+
+test('changed Re-backup source tracks rebuild audio placement without reserving obsolete gaps', () => {
+    const { context } = loadHostLogic();
+    context.layoutUnderTest = {
+        video: { targetTrackNumber: 2 },
+        backupAudio: { targetTrackNumber: 6 },
+        audioOutputs: [
+            { sourceTrackNumber: 1, sourceTrackNumbers: [1], targetTrackNumber: 7 },
+            { sourceTrackNumber: 2, sourceTrackNumbers: [2], targetTrackNumber: 8 },
+            { sourceTrackNumber: 3, sourceTrackNumbers: [3], targetTrackNumber: 9 },
+            { sourceTrackNumber: 4, sourceTrackNumbers: [4], targetTrackNumber: 10 }
+        ]
+    };
+    context.requestedUnderTest = [2, 3, 4, 5].map((trackNumber) => ({
+        kind: 'audio',
+        trackNumber,
+        trackNumbers: [trackNumber]
+    }));
+
+    const rebuilt = JSON.parse(vm.runInContext(
+        'JSON.stringify(ebBuildRebackupAlignmentLayout(layoutUnderTest, requestedUnderTest, true))',
+        context
+    ));
+    assert.equal(rebuilt.audioLayoutRebuilt, true);
+    assert.equal(rebuilt.backupAudio.targetTrackNumber, 6);
+    assert.deepEqual(rebuilt.audioOutputs, []);
+
+    const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
+    assert.match(hostSource, /retainedBackupAudioTrackNumber = backupVideoAudioTrackNumber > 0/);
+    assert.match(hostSource, /rebackupLayout: rebackupAlignmentLayout/);
+});
+
+test('Re-backup compacts an unchanged audio mapping when an old backup layer has a gap', () => {
+    const { context } = loadHostLogic();
+    context.layoutUnderTest = {
+        video: { targetTrackNumber: 2 },
+        backupAudio: { targetTrackNumber: 6, startSeconds: 0 },
+        audioOutputs: [
+            { sourceTrackNumber: 2, sourceTrackNumbers: [2], targetTrackNumber: 7 },
+            { sourceTrackNumber: 4, sourceTrackNumbers: [4], targetTrackNumber: 8 },
+            { sourceTrackNumber: 5, sourceTrackNumbers: [5], targetTrackNumber: 10 }
+        ]
+    };
+    context.requestedUnderTest = [
+        { kind: 'video' },
+        { kind: 'audio', trackNumber: 2, trackNumbers: [2] },
+        { kind: 'audio', trackNumber: 4, trackNumbers: [4] },
+        { kind: 'audio', trackNumber: 5, trackNumbers: [5] }
+    ];
+
+    const rebuilt = JSON.parse(vm.runInContext(
+        'JSON.stringify(ebBuildRebackupAlignmentLayout(layoutUnderTest, requestedUnderTest, true))',
+        context
+    ));
+    assert.equal(rebuilt.audioLayoutRebuilt, true);
+    assert.equal(rebuilt.backupAudio.targetTrackNumber, 6);
+    assert.deepEqual(rebuilt.audioOutputs, []);
+});
+
+test('Align Existing legacy rename requires backup filename rules and matching sequence duration', () => {
+    const { context } = loadHostLogic();
+    const oldVideoPath = 'E:\\Backups\\Old Name_BACKUP.mp4';
+    const oldAudioPath = 'E:\\Backups\\Old Name_Track1-2.mp3';
+    const sequence = {
+        name: 'New Name',
+        getInPoint() { return 0; },
+        getOutPoint() { return 60; },
+        videoTracks: makeCollection([
+            makeTrack(0, [{
+                start: { seconds: 0 }, end: { seconds: 60 },
+                projectItem: { name: 'Old Name_BACKUP.mp4', getMediaPath() { return oldVideoPath; } }
+            }])
+        ], 'numTracks'),
+        audioTracks: makeCollection([
+            makeTrack(0, [{
+                start: { seconds: 0 }, end: { seconds: 60 },
+                projectItem: { name: 'Old Name_Track1-2.mp3', getMediaPath() { return oldAudioPath; } }
+            }])
+        ], 'numTracks')
+    };
+    context.app.project.activeSequence = sequence;
+
+    const matched = JSON.parse(vm.runInContext(
+        'exportBackup.findLegacyBackupForActiveSequence("E:\\\\Backups")',
+        context
+    ));
+    assert.equal(matched.ok, true);
+    assert.equal(matched.found, true);
+    assert.equal(matched.candidate.oldBase, 'Old Name');
+    assert.equal(matched.candidate.files.length, 2);
+
+    sequence.videoTracks[0].clips[0].end.seconds = 20;
+    sequence.audioTracks[0].clips[0].end.seconds = 20;
+    const rejected = JSON.parse(vm.runInContext(
+        'exportBackup.findLegacyBackupForActiveSequence("E:\\\\Backups")',
+        context
+    ));
+    assert.equal(rejected.found, false);
 });

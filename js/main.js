@@ -18,6 +18,8 @@ const AUDIO_FORMAT_STORAGE_KEY = "exportbackup.audioFormat";
 const REMOVE_SEQUENCE_MARKERS_STORAGE_KEY = "exportbackup.removeSequenceMarkers";
 const EXPORT_MODE_STORAGE_KEY = "exportbackup.exportMode";
 const COPY_PROJECT_FILE_STORAGE_KEY = "exportbackup.copyProjectFile";
+const BACKUP_DESTINATION_STORAGE_KEY = "exportbackup.backupDestination";
+const BACKUP_CATEGORIES_STORAGE_KEY = "exportbackup.backupCategories";
 
 const DEFAULT_BACKUP_VIDEO_TRACK = 5;
 const EXPORT_MODE_PREMIERE = "premiere";
@@ -30,8 +32,19 @@ const EXPORT_MONITOR_STABLE_PASSES = 2;
 const EXPORT_MONITOR_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const REBACKUP_RECOVERY_STABLE_WAIT_MS = 2000;
 const CLEANUP_RETRY_INTERVAL_MS = 3000;
+const BACKUP_DESTINATION_FTP = "ftp";
+const BACKUP_DESTINATION_PROJECT_ROOT = "projectRoot";
+const BACKUP_DESTINATION_MANUAL = "manual";
+const FTP_BACKUP_ROOT = "Y:\\@ Backup";
+const BACKUP_CATEGORIES = [
+    "BMD INTRO", "DAILY NEWS SCROLLS", "CTAW", "GPGW", "SHOW",
+    "BMD", "BRE", "GAT", "GOL", "MOS", "NWN", "PCC", "SWA", "VEG", "WAU",
+    "WOW", "AR", "AP", "AW", "CS", "EB", "GG", "HL", "KW",
+    "LS", "NB", "PE", "SS", "UL", "VE", "VR"
+];
 
 let exportFolder = null;
+let manualExportFolder = null;
 let alignFolder = null;
 let hostLoaded = false;
 let busy = false;
@@ -50,6 +63,7 @@ let mergedAudioGroups = [];
 let nextMergedAudioGroupId = 1;
 let inOutPromptResolver = null;
 let cleanupRetryState = null;
+let configuredBackupCategories = BACKUP_CATEGORIES.slice();
 
 function getExtensionRootPath() {
     try {
@@ -174,6 +188,36 @@ function getCopyProjectFileCheckbox() {
     return document.getElementById("copyProjectFileCheckbox");
 }
 
+function getBackupDestinationInputs() {
+    return {
+        ftp: document.getElementById("backupDestinationFtp"),
+        projectRoot: document.getElementById("backupDestinationProjectRoot"),
+        manual: document.getElementById("backupDestinationManual")
+    };
+}
+
+function getSelectedBackupDestination() {
+    const inputs = getBackupDestinationInputs();
+    if (inputs.projectRoot && inputs.projectRoot.checked) {
+        return BACKUP_DESTINATION_PROJECT_ROOT;
+    }
+    if (inputs.manual && inputs.manual.checked) {
+        return BACKUP_DESTINATION_MANUAL;
+    }
+    return BACKUP_DESTINATION_FTP;
+}
+
+function updateDestinationButtonLabel() {
+    const selector = document.getElementById("backupDestinationSelect");
+    if (selector) selector.value = getSelectedBackupDestination();
+    const button = document.getElementById("chooseFolderButton");
+    if (!button) return;
+    const mode = getSelectedBackupDestination();
+    button.hidden = mode !== BACKUP_DESTINATION_MANUAL;
+    button.textContent = mode === BACKUP_DESTINATION_MANUAL ? "Choose Path"
+        : mode === BACKUP_DESTINATION_PROJECT_ROOT ? "Project Root" : "FTP";
+}
+
 function getExportModeInputs() {
     return {
         premiere: document.getElementById("exportModePremiere"),
@@ -192,6 +236,8 @@ function setBusyState(nextBusy) {
 
     busy = nextBusy;
     setDisabled("chooseFolderButton", nextBusy);
+    setDisabled("backupDestinationSelect", nextBusy);
+    setDisabled("copyExistingBackupsButton", nextBusy);
     setDisabled("chooseVideoPresetButton", nextBusy);
     setDisabled("chooseMp3PresetButton", nextBusy);
     setDisabled("chooseWavPresetButton", nextBusy);
@@ -207,7 +253,19 @@ function setBusyState(nextBusy) {
     setDisabled("decrementBackupTrackButton", nextBusy);
     setDisabled("incrementBackupTrackButton", nextBusy);
     setDisabled("mergeAudioButton", nextBusy);
+    setDisabled("clearAudioMergesButton", nextBusy);
     setDisabled("updateButton", nextBusy);
+    setDisabled("categoryNameInput", nextBusy);
+    setDisabled("addCategoryButton", nextBusy);
+    setDisabled("deleteCategoryButton", nextBusy);
+    setDisabled("categoryList", nextBusy);
+
+    const destinationInputs = getBackupDestinationInputs();
+    Object.keys(destinationInputs).forEach((key) => {
+        if (destinationInputs[key]) {
+            destinationInputs[key].disabled = nextBusy;
+        }
+    });
 
     const exportModeInputs = getExportModeInputs();
     Object.keys(exportModeInputs).forEach((key) => {
@@ -451,6 +509,26 @@ function showAlignmentRecoveryError(details) {
     }
     setStatus(lines.join("\n"), "error");
     showResultPrompt("IMPORT NOT COMPLETED", ALIGNMENT_RECOVERY_TEXT);
+}
+
+function confirmBackupCandidates(validation) {
+    const candidates = Array.isArray(validation.backupCandidates) ? validation.backupCandidates : [];
+    const references = Array.isArray(validation.projectReferences) ? validation.projectReferences : [];
+    if (!candidates.length && !references.length) {
+        return true;
+    }
+    const lines = ["Possible existing backups in Premiere:"];
+    candidates.forEach((candidate) => {
+        lines.push("", `${candidate.timelineTrack}: ${candidate.name}`);
+        if (candidate.path) lines.push(candidate.path);
+        lines.push(`Standalone clip, ${Number(candidate.durationSeconds).toFixed(2)} seconds; matches the sequence or export range.`);
+        if (!candidate.exactName) lines.push("Different name: this may be a backup from before the sequence was renamed, or source media.");
+    });
+    references.forEach((reference) => {
+        lines.push("", `Premiere references this output path, but no file was found there:\n${reference.path}`);
+    });
+    lines.push("", "Continue with a new Backup? Existing candidate clips will be kept. Cancel to review them or use Re-backup.");
+    return confirm(lines.join("\n"));
 }
 
 function formatExistingMediaMessage(validation) {
@@ -848,7 +926,7 @@ function getTempUpdaterLogPath() {
 }
 
 function getUserCepExtensionPath() {
-    return path.join(process.env.APPDATA || "", "Adobe", "CEP", "extensions", "ExportBackup");
+    return path.join(process.env.APPDATA || "", "Adobe", "CEP", "extensions", "Backup Project");
 }
 
 function readVersionInfo(silent) {
@@ -1121,24 +1199,67 @@ function loadSavedPresets() {
 
 function loadSavedPaths() {
     try {
+        const savedDestination = localStorage.getItem(BACKUP_DESTINATION_STORAGE_KEY);
+        const destinationInputs = getBackupDestinationInputs();
+        if (savedDestination === BACKUP_DESTINATION_PROJECT_ROOT && destinationInputs.projectRoot) {
+            destinationInputs.projectRoot.checked = true;
+        } else if (savedDestination === BACKUP_DESTINATION_MANUAL && destinationInputs.manual) {
+            destinationInputs.manual.checked = true;
+        } else if (destinationInputs.ftp) {
+            destinationInputs.ftp.checked = true;
+        }
+    } catch (error) {}
+
+    try {
         const savedExportFolder = localStorage.getItem(EXPORT_FOLDER_STORAGE_KEY);
         if (savedExportFolder && savedExportFolder.trim()) {
-            exportFolder = savedExportFolder;
-            alignFolder = savedExportFolder;
-            document.getElementById("exportPath").textContent = exportFolder;
+            manualExportFolder = savedExportFolder;
+            if (getSelectedBackupDestination() === BACKUP_DESTINATION_MANUAL) {
+                exportFolder = manualExportFolder;
+            }
         }
     } catch (error) {}
 
     try {
         const savedAlignFolder = localStorage.getItem(ALIGN_FOLDER_STORAGE_KEY);
-        if (!exportFolder && savedAlignFolder && savedAlignFolder.trim()) {
+        if (savedAlignFolder && savedAlignFolder.trim()) {
             alignFolder = savedAlignFolder;
-            const alignPathElement = document.getElementById("alignPath");
-            if (alignPathElement) {
-                alignPathElement.textContent = alignFolder;
-            }
         }
     } catch (error) {}
+}
+
+function bindBackupDestinationInputs() {
+    const inputs = getBackupDestinationInputs();
+    const selector = document.getElementById("backupDestinationSelect");
+    if (selector) {
+        selector.value = getSelectedBackupDestination();
+        selector.addEventListener("change", () => {
+            const selected = inputs[selector.value];
+            Object.keys(inputs).forEach((key) => { if (inputs[key]) inputs[key].checked = inputs[key] === selected; });
+            if (selected) selected.dispatchEvent(new Event("change"));
+        });
+    }
+    Object.keys(inputs).forEach((key) => {
+        const input = inputs[key];
+        if (!input) {
+            return;
+        }
+        input.addEventListener("change", async () => {
+            if (!input.checked) {
+                return;
+            }
+            try {
+                localStorage.setItem(BACKUP_DESTINATION_STORAGE_KEY, getSelectedBackupDestination());
+            } catch (error) {}
+            if (getSelectedBackupDestination() === BACKUP_DESTINATION_MANUAL) {
+                exportFolder = manualExportFolder;
+            } else {
+                exportFolder = null;
+            }
+            document.getElementById("exportPath").textContent = "Resolving from the Premiere project...";
+            await refreshResolvedBackupDestination();
+        });
+    });
 }
 
 function loadSavedBackupSettings() {
@@ -1273,6 +1394,297 @@ async function getActiveSequenceName() {
     return String(result || "").trim();
 }
 
+async function getActiveProjectInfo() {
+    if (!(await ensureHostLoaded())) {
+        return { ok: false, message: "Could not load Premiere host script." };
+    }
+
+    const result = await callHost("exportBackup.getActiveProjectInfo()");
+    return parseHostResult(result) || { ok: false, message: result || "Could not read the Premiere project file." };
+}
+
+function normalizeBackupCategoryName(value) {
+    return String(value || "")
+        .replace(/^\s*@\s*/, "")
+        .replace(/\s+BACKUP\s*$/i, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toUpperCase();
+}
+
+function getConfiguredBackupCategories() {
+    return configuredBackupCategories.slice().sort((a, b) => {
+        if (b.length !== a.length) {
+            return b.length - a.length;
+        }
+        return a.localeCompare(b);
+    });
+}
+
+function saveConfiguredBackupCategories() {
+    try {
+        localStorage.setItem(BACKUP_CATEGORIES_STORAGE_KEY, JSON.stringify(configuredBackupCategories));
+    } catch (error) {}
+}
+
+function renderCategoryManager(selectedCategory) {
+    const select = document.getElementById("categoryList");
+    if (!select) {
+        return;
+    }
+    const alphabetical = configuredBackupCategories.slice().sort((a, b) => a.localeCompare(b));
+    select.innerHTML = alphabetical
+        .map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`)
+        .join("");
+    if (selectedCategory && alphabetical.indexOf(selectedCategory) >= 0) {
+        select.value = selectedCategory;
+    }
+}
+
+function loadConfiguredBackupCategories() {
+    configuredBackupCategories = BACKUP_CATEGORIES.slice();
+}
+
+function addBackupCategory() {
+    const input = document.getElementById("categoryNameInput");
+    const category = normalizeBackupCategoryName(input ? input.value : "");
+    if (!category || !/^[A-Z0-9]+(?: [A-Z0-9]+)*$/.test(category)) {
+        alert("Enter a category using letters, numbers, and spaces only.");
+        return;
+    }
+    if (configuredBackupCategories.indexOf(category) >= 0) {
+        renderCategoryManager(category);
+        setStatus(`Category ${category} already exists.`);
+        return;
+    }
+    configuredBackupCategories.push(category);
+    saveConfiguredBackupCategories();
+    renderCategoryManager(category);
+    if (input) {
+        input.value = "";
+    }
+    exportFolder = null;
+    setStatus(`Added backup category: ${category}.`);
+    refreshResolvedBackupDestination();
+}
+
+function deleteSelectedBackupCategory() {
+    const select = document.getElementById("categoryList");
+    const category = select ? normalizeBackupCategoryName(select.value) : "";
+    if (!category) {
+        alert("Select a category to delete.");
+        return;
+    }
+    if (configuredBackupCategories.length <= 1) {
+        alert("At least one backup category must remain.");
+        return;
+    }
+    configuredBackupCategories = configuredBackupCategories.filter((candidate) => candidate !== category);
+    saveConfiguredBackupCategories();
+    renderCategoryManager();
+    exportFolder = null;
+    setStatus(`Deleted backup category: ${category}.`);
+    refreshResolvedBackupDestination();
+}
+
+function bindCategoryManager() {
+    const input = document.getElementById("categoryNameInput");
+    if (input) {
+        input.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                addBackupCategory();
+            }
+        });
+    }
+}
+
+function parseBackupProjectName(projectName) {
+    const projectBaseName = path.basename(String(projectName || ""), path.extname(String(projectName || ""))).trim();
+    const normalizedName = projectBaseName.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+    const upperName = normalizedName.toUpperCase();
+    const paddedUpperName = ` ${upperName} `;
+    const category = getConfiguredBackupCategories().find((candidate) => paddedUpperName.indexOf(` ${candidate} `) >= 0) || "";
+    const categoryIndex = category ? paddedUpperName.indexOf(` ${category} `) : -1;
+    const withoutCategory = categoryIndex >= 0
+        ? `${normalizedName.substring(0, categoryIndex)} ${normalizedName.substring(categoryIndex + category.length)}`.replace(/\s+/g, " ").trim()
+        : normalizedName;
+    const parts = withoutCategory ? withoutCategory.split(/\s+/) : [];
+    const episodeNumbers = parts.filter((part) => /^\d+$/.test(part));
+    const title = parts.filter((part) => !/^\d+$/.test(part)).join(" ").trim();
+    const canonicalFolderName = [category].concat(episodeNumbers).concat(title ? [title] : []).filter(Boolean).join(" ");
+
+    return {
+        ok: !!category && episodeNumbers.length > 0,
+        projectBaseName,
+        category,
+        episodeNumbers,
+        title,
+        canonicalFolderName,
+        message: "The saved Premiere project name must contain one configured category and at least one number. They may appear anywhere or in either order."
+    };
+}
+
+function findFtpCategoryFolder(category) {
+    if (!fs.existsSync(FTP_BACKUP_ROOT)) {
+        throw new Error(`FTP backup root is not available:\n${FTP_BACKUP_ROOT}`);
+    }
+
+    const matches = fs.readdirSync(FTP_BACKUP_ROOT, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && normalizeBackupCategoryName(entry.name) === category)
+        .map((entry) => path.join(FTP_BACKUP_ROOT, entry.name));
+    if (!matches.length) {
+        throw new Error(`No category folder matching "${category}" was found in:\n${FTP_BACKUP_ROOT}`);
+    }
+    if (matches.length > 1) {
+        throw new Error(`More than one FTP category folder matches "${category}":\n${matches.join("\n")}`);
+    }
+    return matches[0];
+}
+
+function getGroupedEpisodeRouting(parsedName) {
+    const titleTokens = String((parsedName && parsedName.title) || "").toUpperCase().split(/\s+/).filter(Boolean);
+    const role = titleTokens.indexOf("MAIN") >= 0
+        ? "MAIN"
+        : (titleTokens.indexOf("INTRO") >= 0 ? "INTRO" : "");
+    const episodeNumber = parseInt(parsedName && parsedName.episodeNumbers && parsedName.episodeNumbers[0], 10) || 0;
+    return {
+        enabled: !!role,
+        role,
+        episodeNumber
+    };
+}
+
+function findEpisodeRangeContainer(categoryFolder, category, episodeNumber) {
+    const escapedCategory = String(category || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const rangePattern = new RegExp(`^${escapedCategory}\\s+(\\d+)\\s*-\\s*(\\d+)(?:\\s|$)`, "i");
+    const matches = fs.readdirSync(categoryFolder, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => {
+            const searchableName = entry.name.replace(/^\s*@\s*/, "").replace(/_/g, " ").replace(/\s+/g, " ").trim();
+            const rangeMatch = searchableName.match(rangePattern);
+            if (!rangeMatch) {
+                return null;
+            }
+            const startEpisode = parseInt(rangeMatch[1], 10) || 0;
+            const endEpisode = parseInt(rangeMatch[2], 10) || 0;
+            return episodeNumber >= startEpisode && episodeNumber <= endEpisode
+                ? path.join(categoryFolder, entry.name)
+                : null;
+        })
+        .filter(Boolean);
+
+    if (!matches.length) {
+        throw new Error(
+            `No existing ${category} episode-range container includes episode ${episodeNumber}.\n` +
+            `Please create the group root folder for the ${category} project first.\n` +
+            `Required format: ${category} startEpisode-endEpisode_any name\n` +
+            `Example: ${category} 3240-3251_any name\n` +
+            `Location: ${categoryFolder}`
+        );
+    }
+    if (matches.length > 1) {
+        throw new Error(
+            `More than one ${category} episode-range container includes episode ${episodeNumber}:\n${matches.join("\n")}`
+        );
+    }
+    return matches[0];
+}
+
+function updateCategoryDestinationNote(projectInfo, error) {
+    const note = document.getElementById("categoryDestinationNote");
+    if (!note) return;
+    note.hidden = getSelectedBackupDestination() !== BACKUP_DESTINATION_FTP;
+    if (note.hidden) { note.textContent = ""; return; }
+    const parsed = projectInfo && projectInfo.projectPath
+        ? parseBackupProjectName(projectInfo.projectName || path.basename(projectInfo.projectPath)) : null;
+    if (error) {
+        const message = String(error.message || error);
+        if (/No category folder matching/.test(message)) {
+            note.textContent = "Category folder doesn’t exist on Y:. Create the matching category folder on the drive before copying.";
+        } else if (/configured category/.test(message)) {
+            note.textContent = "Category not found. Use a built-in category in the project name and make sure its matching folder exists on Y:.";
+        } else if (/FTP backup root is not available/.test(message)) {
+            note.textContent = "Cannot access the backup folder on Y:. Make sure the drive and category folder are available before copying.";
+        } else {
+            note.textContent = message.replace(/\s+/g, " ");
+        }
+        return;
+    }
+    note.textContent = parsed && parsed.category
+        ? `Will copy to the ${parsed.category} category on the Y: drive.`
+        : "Will copy to the project’s show category on the Y: drive.";
+}
+
+async function resolveProjectBackupFolder(options) {
+    const settings = options || {};
+    const destinationMode = getSelectedBackupDestination();
+    const projectInfo = await getActiveProjectInfo();
+    updateCategoryDestinationNote(projectInfo);
+    if (!projectInfo.ok || !projectInfo.projectPath) {
+        throw new Error((projectInfo && projectInfo.message) || "Save the Premiere project before backing it up.");
+    }
+
+    let parsedName = null;
+    let folderPath;
+    if (destinationMode === BACKUP_DESTINATION_PROJECT_ROOT) {
+        folderPath = path.join(path.dirname(projectInfo.projectPath), "BACKUP");
+        if (settings.create !== false) {
+            fs.mkdirSync(folderPath, { recursive: true });
+        } else if (settings.requireExisting === true && !fs.existsSync(folderPath)) {
+            throw new Error(`The project backup folder does not exist yet:\n${folderPath}`);
+        }
+    } else if (destinationMode === BACKUP_DESTINATION_MANUAL) {
+        if (!manualExportFolder || !String(manualExportFolder).trim()) {
+            throw new Error("Choose a manual backup folder first.");
+        }
+        folderPath = path.resolve(manualExportFolder);
+        if (!fs.existsSync(folderPath) || !fs.statSync(folderPath).isDirectory()) {
+            throw new Error(`The selected manual backup folder is not available:\n${folderPath}`);
+        }
+    } else {
+        parsedName = parseBackupProjectName(projectInfo.projectName || path.basename(projectInfo.projectPath));
+        if (!parsedName.ok) {
+            throw new Error(`${parsedName.message}\n\nCurrent project: ${parsedName.projectBaseName || "Unnamed"}`);
+        }
+        const categoryFolder = findFtpCategoryFolder(parsedName.category);
+        const groupedRouting = getGroupedEpisodeRouting(parsedName);
+        if (groupedRouting.enabled) {
+            const rangeContainer = findEpisodeRangeContainer(
+                categoryFolder,
+                parsedName.category,
+                groupedRouting.episodeNumber
+            );
+            folderPath = path.join(rangeContainer, String(groupedRouting.episodeNumber));
+        } else {
+            folderPath = path.join(categoryFolder, parsedName.canonicalFolderName);
+        }
+        if (settings.create !== false) {
+            fs.mkdirSync(folderPath, { recursive: true });
+        } else if (settings.requireExisting === true && !fs.existsSync(folderPath)) {
+            throw new Error(`The project backup folder does not exist yet:\n${folderPath}`);
+        }
+    }
+
+    return { folderPath, projectInfo, parsedName, destinationMode };
+}
+
+async function refreshResolvedBackupDestination() {
+    updateDestinationButtonLabel();
+    updateCategoryDestinationNote();
+    try {
+        const resolved = await resolveProjectBackupFolder({ create: false });
+        exportFolder = resolved.folderPath;
+        updateAlignFolder(exportFolder);
+        document.getElementById("exportPath").textContent = exportFolder;
+        return resolved;
+    } catch (error) {
+        document.getElementById("exportPath").textContent = error.message;
+        updateCategoryDestinationNote(null, error);
+        return null;
+    }
+}
+
 async function setActiveSequenceInOutToFullRange() {
     if (!(await ensureHostLoaded())) {
         return { ok: false, message: "Could not load Premiere host script." };
@@ -1326,9 +1738,12 @@ function renderExportSelectionList(selectionInfo) {
     }
 
     exportSelectionState = selectionInfo;
-    mergedAudioGroups = [];
     nextMergedAudioGroupId = 1;
     const items = Array.isArray(selectionInfo.items) ? selectionInfo.items : [];
+    mergedAudioGroups = (Array.isArray(selectionInfo.audioGroups) ? selectionInfo.audioGroups : [])
+        .map((group) => Array.from(new Set((group || []).map((value) => parseInt(value, 10) || 0).filter((value) => value > 0))).sort((a, b) => a - b))
+        .filter((group) => group.length > 1)
+        .map((trackNumbers) => ({ id: `g${nextMergedAudioGroupId++}`, trackNumbers }));
 
     if (!items.length) {
         container.innerHTML = `<div class="small-note">${selectionInfo.message || "No used audio tracks were found in the active sequence yet. The backup MP4 will still be queued."}</div>`;
@@ -1341,16 +1756,21 @@ function renderExportSelectionList(selectionInfo) {
         const checked = item.kind === "video" || item.selected !== false ? "checked" : "";
         const disabled = item.locked ? "disabled" : "";
         const kindLabel = item.kind === "video" ? "Backup video" : `Audio track ${item.trackNumber}`;
-        const detail = item.kind === "audio" && item.trackName ? item.trackName : "";
+        const existingGroup = item.kind === "audio"
+            ? mergedAudioGroups.find((group) => group.trackNumbers.indexOf(parseInt(item.trackNumber, 10) || 0) >= 0)
+            : null;
+        const detail = existingGroup
+            ? `Merged group: ${existingGroup.trackNumbers.join(", ")}`
+            : (item.kind === "audio" && item.trackName ? item.trackName : "");
         let mergeControl = `<span></span>`;
         if (item.kind === "video") {
-            mergeControl = `<button id="mergeAudioButton" class="secondary selection-list-merge-button" type="button" onclick="mergeSelectedAudioTracks()">Merge Selection</button>`;
+            mergeControl = `<span class="selection-list-button-group"><button id="mergeAudioButton" class="secondary selection-list-merge-button" type="button" onclick="mergeSelectedAudioTracks()">Merge Selection</button><button id="clearAudioMergesButton" class="secondary selection-list-merge-button" type="button" onclick="clearAudioMerges()">Clear Merges</button></span>`;
         } else if (item.kind === "audio") {
-            mergeControl = `<label class="merge-checkbox-wrap" for="${mergeCheckboxId}"><span>Merge</span><input class="merge-checkbox" type="checkbox" id="${mergeCheckboxId}" data-kind="audio" data-track-number="${item.trackNumber || 0}" data-merged-group=""></label>`;
+            mergeControl = `<label class="merge-checkbox-wrap" for="${mergeCheckboxId}"><span>Merge</span><input class="merge-checkbox" type="checkbox" id="${mergeCheckboxId}" data-kind="audio" data-track-number="${item.trackNumber || 0}" data-merged-group="${existingGroup ? existingGroup.id : ""}" ${existingGroup ? "checked disabled" : ""}></label>`;
         }
 
         return (
-            `<div class="selection-item">` +
+            `<div class="selection-item${existingGroup ? " is-merged" : ""}">` +
                 `<input class="queue-checkbox" type="checkbox" id="${checkboxId}" data-kind="${item.kind}" data-track-number="${item.trackNumber || 0}" ${checked} ${disabled}>` +
                 `<label for="${checkboxId}">` +
                     `<strong>${escapeHtml(kindLabel)}</strong>` +
@@ -1360,6 +1780,24 @@ function renderExportSelectionList(selectionInfo) {
             `</div>`
         );
     }).join("");
+    container.onchange = updateMergeActionVisibility;
+    updateMergeActionVisibility();
+}
+
+function updateMergeActionVisibility() {
+    const merge = document.getElementById("mergeAudioButton");
+    const clear = document.getElementById("clearAudioMergesButton");
+    if (merge) merge.hidden = getUnmergedCheckedAudioInputs().length < 2;
+    if (clear) clear.hidden = !mergedAudioGroups.length;
+}
+
+function clearAudioMerges() {
+    if (!exportSelectionState) {
+        return;
+    }
+    exportSelectionState.audioGroups = [];
+    renderExportSelectionList(exportSelectionState);
+    setStatus("Audio merge groups cleared. Select tracks and use Merge Selection to create the new Re-backup layout.");
 }
 
 function getUnmergedCheckedAudioInputs() {
@@ -1403,6 +1841,7 @@ function mergeSelectedAudioTracks() {
         }
     });
 
+    updateMergeActionVisibility();
     setStatus(`Merged audio tracks: ${trackNumbers.join(", ")}.`);
 }
 
@@ -1431,7 +1870,8 @@ function getSelectedQueueItems() {
     return {
         includeVideo: videoInput ? !!videoInput.checked : true,
         audioTracks: getSelectedAudioTrackNumbers(),
-        audioGroups: mergedAudioGroups.map((group) => group.trackNumbers)
+        audioGroups: mergedAudioGroups.map((group) => group.trackNumbers),
+        replaceAudioLayout: true
     };
 }
 
@@ -1443,6 +1883,32 @@ async function refreshExportSelection() {
     renderExportSelectionList({ ok: true, items: [], message: "Reading active sequence tracks..." });
     const selectionInfo = await getExportSelectionInfo();
     renderExportSelectionList(selectionInfo);
+}
+
+function getExportSelectionTrackSignature(selectionInfo) {
+    const items = selectionInfo && Array.isArray(selectionInfo.items) ? selectionInfo.items : [];
+    return items
+        .filter((item) => item && item.kind === "audio")
+        .map((item) => parseInt(item.trackNumber, 10) || 0)
+        .filter((trackNumber) => trackNumber > 0)
+        .sort((a, b) => a - b)
+        .join(",");
+}
+
+async function syncExportSelectionWithActiveTimeline() {
+    const latestSelection = await getExportSelectionInfo();
+    if (!latestSelection || !latestSelection.ok) {
+        throw new Error((latestSelection && latestSelection.message) || "Could not read the active sequence audio tracks.");
+    }
+
+    const previousSignature = getExportSelectionTrackSignature(exportSelectionState);
+    const latestSignature = getExportSelectionTrackSignature(latestSelection);
+    if (!exportSelectionState || previousSignature !== latestSignature) {
+        renderExportSelectionList(latestSelection);
+        setStatus(`Audio track layout updated from the active sequence: ${latestSignature || "no source audio tracks"}.`);
+        return true;
+    }
+    return false;
 }
 
 function parseTrackNumbersFromFileName(name, baseName) {
@@ -2272,8 +2738,61 @@ async function ensureRebackupTempFilesAreStable(entries) {
     }
 }
 
+function findBackupLeftovers(matchInfo) {
+    const current = (matchInfo.audio || []).map(entry => entry.path);
+    if (matchInfo.videoPath) current.push(matchInfo.videoPath);
+    const ready = file => { try { return fs.statSync(file).isFile() && fs.statSync(file).size > 0; } catch (_) { return false; } };
+    const descriptions = current.filter(ready).map(file => {
+        const match = path.basename(file).match(/^(.+)_(BACKUP|Track(\d+(?:-\d+)*))\.(mp4|mov|mxf|avi|wav|mp3)$/i);
+        return match && {file,base:match[1].toLowerCase(),role:match[2].toLowerCase(),tracks:match[3] ? match[3].split('-') : []};
+    }).filter(Boolean);
+    const currentKeys = new Set(current.map(getPathComparisonKey));
+    const folders = Array.from(new Set(descriptions.map(entry => path.dirname(entry.file))));
+    const leftovers = [];
+    folders.forEach(folder => {
+        fs.readdirSync(folder,{withFileTypes:true}).filter(entry => entry.isFile()).forEach(entry => {
+            const file = path.join(folder,entry.name);
+            if (currentKeys.has(getPathComparisonKey(file))) return;
+            const match = entry.name.match(/^(.+)_(BACKUP|Track(\d+(?:-\d+)*))(_REBKP_OLD_\d+(?:_\d+)?|_REBKP_TEMP)?\.(mp4|mov|mxf|avi|wav|mp3)$/i);
+            if (!match) return;
+            const tracks = match[3] ? match[3].split('-') : [];
+            const replacement = descriptions.find(item => item.base === match[1].toLowerCase() && (
+                (match[4] && item.role === match[2].toLowerCase()) ||
+                (tracks.length && item.tracks.length > tracks.length && tracks.every(track => item.tracks.includes(track)))
+            ));
+            if (replacement) leftovers.push({path:file,replacement:replacement.file});
+        });
+    });
+    return leftovers;
+}
+
+async function cleanupDiscoveredBackupLeftovers(matchInfo) {
+    const candidates = findBackupLeftovers(matchInfo);
+    if (!candidates.length) return {deleted:[],retained:[]};
+    const result = parseHostResult(await callHost(`exportBackup.releaseUnusedBackupLeftovers("${escapeForEvalScript(JSON.stringify(candidates.map(entry => entry.path)))}")`));
+    if (!result || !result.ok) throw new Error(result && result.message || 'Could not verify backup leftover usage.');
+    const allowed = new Set((result.safePaths || []).map(getPathComparisonKey));
+    const deleted = [], retained = [];
+    candidates.forEach(entry => {
+        let replacementReady = false;
+        try { replacementReady = fs.statSync(entry.replacement).size > 0; } catch (_) {}
+        if (!allowed.has(getPathComparisonKey(entry.path)) || !replacementReady) { retained.push(entry.path); return; }
+        const removed = deleteLocalFileNow(entry.path);
+        (removed.ok ? deleted : retained).push(entry.path);
+    });
+    return {deleted,retained};
+}
+
 async function prepareAlignExistingCleanup(matchInfo) {
-    const stalePaths = matchInfo && Array.isArray(matchInfo.staleAudioPaths) ? matchInfo.staleAudioPaths : [];
+    const stalePaths = matchInfo && Array.isArray(matchInfo.staleAudioPaths) ? matchInfo.staleAudioPaths.slice() : [];
+    const obsoleteAudioFiles = matchInfo && matchInfo.manifest && Array.isArray(matchInfo.manifest.obsoleteAudioFiles)
+        ? matchInfo.manifest.obsoleteAudioFiles
+        : [];
+    obsoleteAudioFiles.forEach((obsoletePath) => {
+        if (obsoletePath && stalePaths.indexOf(obsoletePath) < 0) {
+            stalePaths.push(obsoletePath);
+        }
+    });
     const expectedFiles = [];
 
     if (matchInfo && matchInfo.videoPath) {
@@ -2661,7 +3180,7 @@ async function startPendingCleanupRetry(manifest, stalePaths, successTitle, pend
 
     showCleanupRetryPrompt(
         "ALIGN EXISTING WILL RETRY",
-        `The first import and alignment finished, but ${state.pendingCount} cleanup item(s) remain.\n\nIn 3 seconds, ExportBackup will remove the aligned backup clips, import the files again, and restore their positions.`,
+        `The first import and alignment finished, but ${state.pendingCount} cleanup item(s) remain.\n\nIn 3 seconds, Backup Project will remove the aligned backup clips, import the files again, and restore their positions.`,
         "pending"
     );
     queuePendingCleanupRetry(state);
@@ -2739,6 +3258,7 @@ function createExportManifestFromHostResult(parsed) {
         rebackupPrepared: parsed.rebackupPrepared === true,
         rebackupLayout: parsed.rebackupLayout || null,
         expectedFiles: Array.isArray(parsed.queuedFiles) ? parsed.queuedFiles : [],
+        obsoleteAudioFiles: Array.isArray(parsed.obsoleteAudioFiles) ? parsed.obsoleteAudioFiles : [],
         manifestPath: "",
         projectName: parsed.projectName || "",
         projectPath: parsed.projectPath || ""
@@ -2791,6 +3311,218 @@ function copyProjectToFolder(projectPath, destinationFolder) {
     }
 }
 
+async function renameLegacyBackupFilesForSequence(folderPath, sequenceName) {
+    const raw = await callHost(
+        `exportBackup.findLegacyBackupForActiveSequence("${escapeForEvalScript(folderPath)}")`
+    );
+    const result = parseHostResult(raw);
+    if (!result || result.ok === false) {
+        throw new Error((result && result.message) || "Could not inspect existing backup names in Premiere.");
+    }
+    if (!result.found || !result.candidate || !Array.isArray(result.candidate.files)) {
+        return { renamedCount: 0, message: result.message || "" };
+    }
+
+    const sanitizedBase = sanitizeSequenceName(sequenceName);
+    const legacyLayout = result.candidate.layout || null;
+    const folderKey = `${path.resolve(folderPath).toLowerCase()}${path.sep}`;
+    const operations = [];
+    result.candidate.files.forEach((entry) => {
+        if (!entry || !entry.path) {
+            return;
+        }
+        const sourcePath = path.resolve(entry.path);
+        if (!fileExists(sourcePath)) {
+            return;
+        }
+        if (`${sourcePath.toLowerCase()}${path.sep}`.indexOf(folderKey) !== 0) {
+            throw new Error(`Refusing to rename a backup file outside the selected folder:\n${sourcePath}`);
+        }
+        const extension = path.extname(sourcePath);
+        const trackNumbers = Array.isArray(entry.trackNumbers)
+            ? entry.trackNumbers.map((value) => parseInt(value, 10) || 0).filter((value) => value > 0)
+            : [];
+        const targetName = entry.kind === "video"
+            ? `${sanitizedBase}_BACKUP${extension}`
+            : `${sanitizedBase}_Track${trackNumbers.join("-")}${extension}`;
+        if (entry.kind === "audio" && !trackNumbers.length) {
+            return;
+        }
+        const targetPath = path.join(folderPath, targetName);
+        if (getPathComparisonKey(sourcePath) === getPathComparisonKey(targetPath)) {
+            return;
+        }
+        if (fileExists(targetPath)) {
+            return;
+        }
+        operations.push({ sourcePath, targetPath, kind: entry.kind });
+    });
+
+    if (!operations.length) {
+        return { renamedCount: 0, message: "Matching backup files already use the active sequence name." };
+    }
+
+    await prepareRebackupReplacement({
+        expectedFiles: operations.map((operation) => ({
+            kind: operation.kind,
+            path: operation.sourcePath,
+            finalPath: operation.sourcePath,
+            sourceMediaPath: operation.sourcePath
+        }))
+    });
+
+    const completed = [];
+    try {
+        operations.forEach((operation) => {
+            fs.renameSync(operation.sourcePath, operation.targetPath);
+            completed.push(operation);
+        });
+    } catch (error) {
+        completed.reverse().forEach((operation) => {
+            try {
+                if (fileExists(operation.targetPath) && !fileExists(operation.sourcePath)) {
+                    fs.renameSync(operation.targetPath, operation.sourcePath);
+                }
+            } catch (rollbackError) {}
+        });
+        try {
+            const legacyVideo = result.candidate.files.find((entry) => entry && entry.kind === "video");
+            const legacyAudio = result.candidate.files
+                .filter((entry) => entry && entry.kind === "audio")
+                .map((entry) => ({
+                    path: entry.path,
+                    trackNumber: parseInt((entry.trackNumbers || [])[0], 10) || 0,
+                    trackNumbers: entry.trackNumbers || [],
+                    name: path.basename(entry.path || "")
+                }));
+            const restoreScript = `exportBackup.alignMappedFiles(` +
+                `"${escapeForEvalScript(legacyVideo ? legacyVideo.path : "")}",` +
+                `"${escapeForEvalScript(JSON.stringify(legacyAudio))}",` +
+                `${getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK)},false,` +
+                `"${escapeForEvalScript(JSON.stringify(legacyLayout))}")`;
+            await callHost(restoreScript);
+        } catch (restoreError) {}
+        throw new Error(`Could not rename all matching backup files. Completed renames were rolled back.\n${error.message}`);
+    }
+
+    return {
+        renamedCount: completed.length,
+        legacyLayout,
+        message: `Renamed ${completed.length} backup file(s) to match sequence "${sanitizedBase}".`
+    };
+}
+
+async function copyExistingBackupsToResolvedLocation() {
+    if (busy) {
+        return;
+    }
+    setBusyState(true);
+    setStatus("Reading existing backup files from the active sequence...");
+    const copiedTargets = [];
+    try {
+        if (!(await ensureHostLoaded())) {
+            throw new Error("Could not load Premiere host script.");
+        }
+        const sequenceName = await getActiveSequenceName();
+        if (!sequenceName) {
+            throw new Error("No active sequence is open in Premiere Pro.");
+        }
+
+        const destination = await resolveProjectBackupFolder({ create: true });
+        const destinationFolder = destination.folderPath;
+        const sourcePaths = [];
+        const addLayoutPath = (entry) => {
+            if (!entry) {
+                return;
+            }
+            const candidate = entry.currentMediaPath || entry.mediaPath || "";
+            if (candidate && fileExists(candidate)) {
+                sourcePaths.push(candidate);
+            }
+        };
+
+        const rawLayout = await callHost("exportBackup.getActiveBackupLayout()");
+        const activeBackup = parseHostResult(rawLayout);
+        if (!activeBackup || activeBackup.ok === false) {
+            throw new Error((activeBackup && activeBackup.message) || "Could not read existing backups from Premiere.");
+        }
+        const layout = activeBackup.layout || {};
+        addLayoutPath(layout.video);
+        addLayoutPath(layout.backupAudio);
+        (layout.audioOutputs || []).forEach(addLayoutPath);
+
+        if (!sourcePaths.length) {
+            const rawLegacy = await callHost(
+                "exportBackup.findLegacyBackupForActiveSequence(\"\", true)"
+            );
+            const legacy = parseHostResult(rawLegacy);
+            if (!legacy || legacy.ok === false) {
+                throw new Error((legacy && legacy.message) || "Could not inspect existing backup files.");
+            }
+            if (legacy.ambiguous) {
+                throw new Error("Multiple backup sets match the active sequence duration, so nothing was copied automatically.");
+            }
+            if (legacy.found && legacy.candidate && Array.isArray(legacy.candidate.files)) {
+                legacy.candidate.files.forEach((entry) => {
+                    if (entry && entry.path) {
+                        sourcePaths.push(entry.path);
+                    }
+                });
+            }
+        }
+
+        const uniqueSourcePaths = Array.from(new Set(sourcePaths.map((filePath) => path.resolve(filePath))));
+        if (!uniqueSourcePaths.length) {
+            throw new Error("No matching backup files are currently used by the active sequence.");
+        }
+
+        let alreadyAtDestination = 0;
+        uniqueSourcePaths.forEach((sourcePath) => {
+            const targetPath = path.join(destinationFolder, path.basename(sourcePath));
+            if (!fileExists(sourcePath)) {
+                throw new Error(`Existing backup file was not found:\n${sourcePath}`);
+            }
+            if (getPathComparisonKey(sourcePath) === getPathComparisonKey(targetPath)) {
+                alreadyAtDestination += 1;
+                return;
+            }
+            if (fileExists(targetPath)) {
+                if (fs.statSync(sourcePath).size === fs.statSync(targetPath).size) {
+                    alreadyAtDestination += 1;
+                    return;
+                }
+                throw new Error(`A different backup file with the same name already exists at the destination:\n${targetPath}`);
+            }
+            fs.copyFileSync(sourcePath, targetPath);
+            if (fs.statSync(sourcePath).size !== fs.statSync(targetPath).size) {
+                throw new Error(`Copied backup verification failed:\n${targetPath}`);
+            }
+            copiedTargets.push(targetPath);
+        });
+
+        exportFolder = destinationFolder;
+        updateAlignFolder(destinationFolder);
+        document.getElementById("exportPath").textContent = destinationFolder;
+        setBusyState(false);
+        const resultMessage = copiedTargets.length
+            ? `Copied ${copiedTargets.length} existing backup file(s).`
+            : `All ${alreadyAtDestination} matching backup file(s) are already at the destination.`;
+        setStatus(`${resultMessage}\nDestination: ${destinationFolder}`, "success");
+        showBlockingMessage(`${resultMessage}\n\nDestination:\n${destinationFolder}`);
+    } catch (error) {
+        copiedTargets.forEach((targetPath) => {
+            try {
+                if (fileExists(targetPath)) {
+                    fs.unlinkSync(targetPath);
+                }
+            } catch (cleanupError) {}
+        });
+        setBusyState(false);
+        setStatus(error.message, "error");
+        showBlockingMessage(error.message);
+    }
+}
+
 async function runAlignmentFlow(folderPath, options) {
     const settings = options || {};
     const cleanupRetryContext = settings.cleanupRetryContext || null;
@@ -2832,7 +3564,27 @@ async function runAlignmentFlow(folderPath, options) {
             return reportAlignmentFailure("No active sequence is open in Premiere Pro.");
         }
 
+        let legacyRenameLayout = null;
+        if (!settings.manifestOnly && !settings.cleanupRetryContext) {
+            const renameResult = await renameLegacyBackupFilesForSequence(folderPath, activeSequenceName);
+            legacyRenameLayout = renameResult.legacyLayout || null;
+            if (renameResult.renamedCount > 0) {
+                setStatus(`${renameResult.message}\nImporting and aligning the renamed files...`);
+            }
+        }
+
         let manifest = settings.manifest || readManifestForSequence(folderPath, activeSequenceName);
+        if (!manifest && legacyRenameLayout) {
+            manifest = {
+                rebackup: true,
+                rebackupLayout: legacyRenameLayout,
+                backupVideoTrackNumber: legacyRenameLayout.video
+                    ? parseInt(legacyRenameLayout.video.targetTrackNumber, 10) || DEFAULT_BACKUP_VIDEO_TRACK
+                    : DEFAULT_BACKUP_VIDEO_TRACK,
+                expectedFiles: [],
+                obsoleteAudioFiles: []
+            };
+        }
         const manifestOnly = settings.manifestOnly === true && !!manifest;
 
         if (
@@ -2898,7 +3650,11 @@ async function runAlignmentFlow(folderPath, options) {
             alignmentCleanup && alignmentCleanup.stalePaths,
             [0]
         );
-        const deletedOldFileCount = cleanupSummary.deletedOldFileCount;
+        let extraCleanup = {deleted:[],retained:[]};
+        let extraCleanupError = '';
+        try { extraCleanup = await cleanupDiscoveredBackupLeftovers(matchInfo); }
+        catch (error) { extraCleanupError = error.message; }
+        const deletedOldFileCount = cleanupSummary.deletedOldFileCount + extraCleanup.deleted.length;
         const premiereCleanupPendingCount = cleanupSummary.premiereCleanupPendingPaths.length;
         let pendingCleanupCount = cleanupSummary.pendingCount;
         const shouldCopyProject = !!(getCopyProjectFileCheckbox() && getCopyProjectFileCheckbox().checked);
@@ -2908,6 +3664,8 @@ async function runAlignmentFlow(folderPath, options) {
 
         const successTitle = getCompletionStatusTitle(settings, matchInfo.manifest);
         const lines = [successTitle, parsed.message || "Alignment completed."];
+        if (extraCleanup.retained.length) lines.push('Leftovers still used by a sequence or held by Premiere/Windows were kept:\n' + extraCleanup.retained.join('\n') + '\nRun Align Existing again after they are released.');
+        if (extraCleanupError) lines.push('Additional leftover cleanup could not finish: ' + extraCleanupError + '\nRun Align Existing again to retry.');
         if (parsed.importBinName) {
             lines.push(`Imported backup files were added to project bin: ${parsed.importBinName}`);
         }
@@ -3103,11 +3861,19 @@ async function chooseExportFolder() {
 
     const result = window.cep.fs.showOpenDialogEx(false, true, "Choose Export Folder");
     if (result.data && result.data.length > 0) {
-        exportFolder = result.data[0];
+        manualExportFolder = result.data[0];
+        exportFolder = manualExportFolder;
         alignFolder = exportFolder;
+        const inputs = getBackupDestinationInputs();
+        if (inputs.manual) {
+            inputs.manual.checked = true;
+        }
+        updateDestinationButtonLabel();
+        updateCategoryDestinationNote();
         try {
-            localStorage.setItem(EXPORT_FOLDER_STORAGE_KEY, exportFolder);
+            localStorage.setItem(EXPORT_FOLDER_STORAGE_KEY, manualExportFolder);
             localStorage.setItem(ALIGN_FOLDER_STORAGE_KEY, alignFolder);
+            localStorage.setItem(BACKUP_DESTINATION_STORAGE_KEY, BACKUP_DESTINATION_MANUAL);
         } catch (error) {}
         document.getElementById("exportPath").textContent = exportFolder;
         setStatus("Export folder selected. Ready.");
@@ -3171,6 +3937,23 @@ async function chooseWavPreset() {
     }
 }
 
+async function resolveExportActionDestination(isRebackup) {
+    if (!(await ensureHostLoaded())) throw new Error("Could not load Premiere host script.");
+    const existing = parseHostResult(await callHost("exportBackup.getActiveBackupLayout()"));
+    if (!existing || !existing.ok) throw new Error(existing && existing.message || "Could not inspect existing backups.");
+    const layout = existing.layout || {};
+    const entries = [layout.video, layout.backupAudio].concat(layout.audioOutputs || []).filter(Boolean);
+    const paths = Array.from(new Set(entries.map((entry) => entry.mediaPath || entry.currentMediaPath).filter(Boolean)));
+    if (paths.length) {
+        if (!isRebackup) throw new Error("Backup files already exist in the sequence or project. Use Re-backup to replace them.\n\n" + paths.join("\n"));
+        const folderPath = path.dirname(paths[0]);
+        if (!fs.existsSync(folderPath)) throw new Error("The existing backup folder is unavailable:\n" + folderPath);
+        return {folderPath, existingBackup: existing};
+    }
+    if (isRebackup) throw new Error("No existing backup files were found for the active sequence. Use Backup to create the first backup.");
+    return resolveProjectBackupFolder({ create: true });
+}
+
 async function runExport(isRebackup) {
     if (busy) {
         return;
@@ -3178,10 +3961,32 @@ async function runExport(isRebackup) {
 
     await stopPendingCleanupRetry(true);
 
-    if (!exportFolder) {
-        alert("Choose an export folder first.");
+    try {
+        await syncExportSelectionWithActiveTimeline();
+    } catch (error) {
+        alert(error.message);
+        setStatus(error.message, "error");
         return;
     }
+
+    let destination;
+    try {
+        destination = await resolveExportActionDestination(isRebackup);
+    } catch (error) {
+        alert(error.message);
+        setStatus(error.message, "error");
+        return;
+    }
+
+    exportFolder = destination.folderPath;
+    updateAlignFolder(exportFolder);
+    document.getElementById("exportPath").textContent = exportFolder;
+    try {
+        if (destination.destinationMode === BACKUP_DESTINATION_MANUAL) {
+            localStorage.setItem(EXPORT_FOLDER_STORAGE_KEY, manualExportFolder);
+        }
+        if (destination.destinationMode) localStorage.setItem(BACKUP_DESTINATION_STORAGE_KEY, destination.destinationMode);
+    } catch (error) {}
 
     const selectedAudioFormat = getSelectedAudioFormat();
     const selectedAudioPresetPath = selectedAudioFormat === "wav" ? wavPresetPath : mp3PresetPath;
@@ -3248,6 +4053,11 @@ async function runExport(isRebackup) {
         return;
     }
 
+    if (!isRebackup && !confirmBackupCandidates(validation)) {
+        setStatus("Backup cancelled. Review the listed clips before choosing Backup or Re-backup.");
+        setBusyState(false);
+        return;
+    }
 
     if (autoEmptyTrack) {
         const backupTrackInput = getBackupVideoTrackInput();
@@ -3355,15 +4165,47 @@ async function alignExistingFolder() {
     }
 
     await stopPendingCleanupRetry(true);
+    let manifest;
+    try {
+        const destination = await resolveExportActionDestination(true);
+        exportFolder = destination.folderPath;
+        const existing = destination.existingBackup;
+        manifest = readManifestForSequence(exportFolder, existing.sequenceName);
+        if (!manifest) manifest = createExistingBackupAlignmentManifest(existing, exportFolder);
+        updateAlignFolder(exportFolder);
+        document.getElementById("exportPath").textContent = exportFolder;
+    } catch (error) {
+        alert(error.message);
+        setStatus(error.message, "error");
+        return;
+    }
     await runAlignmentFlow(exportFolder || alignFolder, {
+        manifest,
+        manifestOnly: true,
         skipVideo: false,
         autoTriggered: false
     });
 }
 
+function createExistingBackupAlignmentManifest(existing, folderPath) {
+    const layout = existing.layout || {};
+    const expectedFiles = [];
+    const video = layout.video || layout.backupAudio;
+    if (video) expectedFiles.push({kind: "video", path: video.mediaPath || video.currentMediaPath});
+    (layout.audioOutputs || []).forEach((entry) => expectedFiles.push({
+        kind: "audio", path: entry.mediaPath || entry.currentMediaPath,
+        trackNumber: entry.sourceTrackNumber,
+        trackNumbers: entry.sourceTrackNumbers || [entry.sourceTrackNumber]
+    }));
+    return {folderPath, sequenceName: existing.sequenceName, baseName: layout.baseName || existing.baseName,
+        rebackup: true, rebackupLayout: layout, expectedFiles, obsoleteAudioFiles: [],
+        backupVideoTrackNumber: layout.video && layout.video.targetTrackNumber || getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK)};
+}
+
 document.addEventListener("DOMContentLoaded", () => {
     readVersionInfo();
     loadSavedPresets();
+    loadConfiguredBackupCategories();
     loadSavedPaths();
     loadSavedUiState();
     bindAudioFormatInputs();
@@ -3373,7 +4215,10 @@ document.addEventListener("DOMContentLoaded", () => {
     bindBackupTrackStepper();
     bindInOutPrompt();
     bindCleanupRetryPrompt();
+    bindBackupDestinationInputs();
+    bindCategoryManager();
     resetAutoEmptyBackupTrackOption();
+    refreshResolvedBackupDestination();
     markBackupInputsDirty();
     loadSavedBackupSettings();
     setQueueBackupSectionVisibility(true);

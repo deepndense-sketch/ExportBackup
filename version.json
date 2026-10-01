@@ -1,5 +1,5 @@
 {
-  "version": "4.7.0",
+  "version": "4.7.1",
   "channel": "main",
-  "notes": "Release 4.7.0 renames the panel Backup Project, adds Collector sequence tabs and automatic Premiere track-lock refresh, simplifies destination controls, and fixes existing-backup discovery, re-backup, alignment cleanup, and Project Root exports into BACKUP."
+  "notes": "Release 4.7.1 records standing release rules for version bumps, synchronized metadata, and preserving automatic GitHub update checks and the download/install action. Plugin behavior is unchanged from 4.7.0."
 }

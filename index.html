@@ -645,6 +645,12 @@ button:disabled {
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
 }
 
+.update-notice { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid #755132; border-radius: 9px; background: #30271e; color: #ffcf99; font-size: 12px; }
+.update-notice[hidden] { display: none; }
+.update-notice button { padding: 7px 12px; }
+.dialog-panel.update-dialog { background: #292c31; border: 1px solid #f39b48; border-top-width: 3px; border-radius: 14px; padding: 22px; }
+.update-dialog .dialog-copy { color: #e3e5e9; line-height: 1.5; }
+.update-dialog .dialog-actions button { padding: 10px 16px; }
 .dialog-panel h2 {
     font-size: 18px;
     color: #dcecff;
@@ -804,17 +810,22 @@ body[data-active-tool="export"] { background: #1c1c1d; }
                 <div class="section-label">Backup</div>
                 <div class="header-actions">
                     <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh</button>
-                    <button id="updateButton" class="secondary" onclick="runGithubUpdate()">Version ...</button>
+                    <button id="updateButton" class="secondary" onclick="showUpdatePrompt(false)">Version ...</button>
                 </div>
             </div>
         </div>
 
+        <div id="updateNotice" class="update-notice" hidden>
+            <span id="updateNoticeText"></span>
+            <button type="button" onclick="showUpdatePrompt(false)">Update now</button>
+        </div>
         <div id="queueBackupSectionContent" class="stack">
             <div class="destination-heading">
                 <label for="backupDestinationSelect">Path</label>
                 <select id="backupDestinationSelect">
                     <option value="ftp">FTP / Category</option>
                     <option value="projectRoot">Project Root</option>
+                    <option value="parentFolder">Parent Folder</option>
                     <option value="manual">Manual Path</option>
                 </select>
                 <div class="action-line folder-action-line">
@@ -825,6 +836,7 @@ body[data-active-tool="export"] { background: #1c1c1d; }
             <div hidden>
                 <input type="radio" id="backupDestinationFtp" name="backupDestination" value="ftp" checked>
                 <input type="radio" id="backupDestinationProjectRoot" name="backupDestination" value="projectRoot">
+                <input type="radio" id="backupDestinationParentFolder" name="backupDestination" value="parentFolder">
                 <input type="radio" id="backupDestinationManual" name="backupDestination" value="manual">
             </div>
             <div id="categoryDestinationNote" class="small-note" aria-live="polite" hidden></div>
@@ -909,6 +921,17 @@ body[data-active-tool="export"] { background: #1c1c1d; }
     </section>
 </div>
 
+<div id="updatePrompt" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="updatePromptTitle" aria-describedby="updatePromptCopy" onkeydown="handleUpdatePromptKey(event)">
+    <div class="dialog-panel update-dialog stack">
+        <h2 id="updatePromptTitle">Backup Project update available</h2>
+        <p id="updatePromptCopy" class="dialog-copy">Update Backup Project directly in Premiere's plugin folder.</p>
+        <p class="dialog-copy">Save your project first. Accept the Windows permission prompt if shown, then <strong>restart Premiere after the update finishes.</strong></p>
+        <div class="dialog-actions">
+            <button id="updateLaterButton" type="button" class="secondary" onclick="closeUpdatePrompt()">Later</button>
+            <button id="updateInstallButton" type="button" onclick="installPromptedUpdate()">Update now</button>
+        </div>
+    </div>
+</div>
 <div id="inOutPrompt" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="inOutPromptTitle" tabindex="-1">
     <div class="dialog-panel stack">
         <h2 id="inOutPromptTitle">Sequence In and Out are not set</h2>

@@ -4,6 +4,36 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+test('update prompt offers Later without installing and blocks updates during Collector copying', () => {
+    const source = fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
+    const elements = {};
+    const document = {getElementById:id => elements[id], activeElement:null};
+    for (const id of ['updatePrompt','updatePromptTitle','updateLaterButton','updateInstallButton']) {
+        const classes = new Set(id === 'updatePrompt' ? ['is-hidden'] : []);
+        elements[id] = {classList:{contains:value => classes.has(value),add:value => classes.add(value),remove:value => classes.delete(value)},focus() {document.activeElement=this;}};
+    }
+    let copying = false, installs = 0;
+    elements.collectorPanel = {contentWindow:{isCollectorBusy:() => copying}};
+    const context = vm.createContext({document,busy:false,remoteVersion:'4.8.0',localVersion:'4.7.6',compareVersions:() => 1,runGithubUpdate:() => installs++});
+    vm.runInContext(source.slice(source.indexOf("let promptedUpdateVersion = ''"),source.indexOf('function escapeForEvalScript(')),context);
+    context.showUpdatePrompt(true);
+    assert.equal(elements.updatePromptTitle.textContent,'Backup Project 4.8.0 is available');
+    assert.equal(elements.updatePrompt.classList.contains('is-hidden'),false);
+    context.closeUpdatePrompt();
+    context.showUpdatePrompt(true);
+    assert.equal(elements.updatePrompt.classList.contains('is-hidden'),true);
+    assert.equal(installs,0);
+    copying = true;
+    context.showUpdatePrompt(false);
+    context.installPromptedUpdate();
+    assert.equal(installs,0);
+    copying = false;
+    context.showUpdatePrompt(false);
+    context.installPromptedUpdate();
+    assert.equal(installs,1);
+    assert.equal(elements.updatePrompt.classList.contains('is-hidden'),true);
+});
+
 test('updater launch preserves spaces, apostrophes, and literal PowerShell characters', () => {
     const source = fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
     const context = vm.createContext({Buffer});
@@ -57,7 +87,7 @@ test('Project Root previews and creates a BACKUP subfolder beside the project', 
     const created = [];
     const context = vm.createContext({path:path.win32,
         fs:{mkdirSync:(folder,options) => created.push({folder,recursive:options.recursive}),existsSync:() => false},
-        BACKUP_DESTINATION_PROJECT_ROOT:'projectRoot',BACKUP_DESTINATION_MANUAL:'manual',
+        BACKUP_DESTINATION_PROJECT_ROOT:'projectRoot',BACKUP_DESTINATION_PARENT_FOLDER:'parentFolder',BACKUP_DESTINATION_MANUAL:'manual',
         getSelectedBackupDestination:() => 'projectRoot',
         getActiveProjectInfo:async () => ({ok:true,projectPath:'D:\\Edits\\Show.prproj'}),
         updateCategoryDestinationNote() {}});
@@ -68,22 +98,40 @@ test('Project Root previews and creates a BACKUP subfolder beside the project', 
     assert.deepEqual(created,[{folder:'D:\\Edits\\BACKUP',recursive:true}]);
 });
 
+test('Parent Folder previews outside the project directory and reuses an existing BACKUP folder', async () => {
+    const source = fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
+    const created = [];
+    const context = vm.createContext({path:path.win32,
+        fs:{mkdirSync:(folder,options) => created.push({folder,recursive:options.recursive}),existsSync:() => true},
+        BACKUP_DESTINATION_PROJECT_ROOT:'projectRoot',BACKUP_DESTINATION_PARENT_FOLDER:'parentFolder',BACKUP_DESTINATION_MANUAL:'manual',
+        getSelectedBackupDestination:() => 'parentFolder',
+        getActiveProjectInfo:async () => ({ok:true,projectPath:'D:\\Show\\Project\\Edit.prproj'}),
+        updateCategoryDestinationNote() {}});
+    vm.runInContext(source.slice(source.indexOf('async function resolveProjectBackupFolder('),source.indexOf('async function refreshResolvedBackupDestination(')),context);
+    assert.equal((await context.resolveProjectBackupFolder({create:false,requireExisting:true})).folderPath,'D:\\Show\\BACKUP');
+    assert.equal(created.length,0);
+    assert.equal((await context.resolveProjectBackupFolder({create:true})).folderPath,'D:\\Show\\BACKUP');
+    assert.deepEqual(created,[{folder:'D:\\Show\\BACKUP',recursive:true}]);
+    context.getActiveProjectInfo = async () => ({ok:true,projectPath:'D:\\Edit.prproj'});
+    assert.equal((await context.resolveProjectBackupFolder({create:false})).folderPath,'D:\\BACKUP');
+});
+
 test('destination dropdown selects the existing routing mode and only offers browsing for manual paths', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
     const elements = {};
-    for (const id of ['backupDestinationFtp','backupDestinationProjectRoot','backupDestinationManual','backupDestinationSelect','chooseFolderButton','exportPath']) {
+    for (const id of ['backupDestinationFtp','backupDestinationProjectRoot','backupDestinationParentFolder','backupDestinationManual','backupDestinationSelect','chooseFolderButton','exportPath']) {
         elements[id] = {checked:id === 'backupDestinationFtp', events:{}, addEventListener(name, fn) {this.events[name]=fn;}, dispatchEvent(event) {return this.events[event.type]();}};
     }
     const context = vm.createContext({document:{getElementById:id => elements[id]},
         Event:class {constructor(type) {this.type=type;}}, localStorage:{setItem() {}},
-        BACKUP_DESTINATION_FTP:'ftp', BACKUP_DESTINATION_PROJECT_ROOT:'projectRoot', BACKUP_DESTINATION_MANUAL:'manual',
+        BACKUP_DESTINATION_FTP:'ftp', BACKUP_DESTINATION_PROJECT_ROOT:'projectRoot', BACKUP_DESTINATION_PARENT_FOLDER:'parentFolder', BACKUP_DESTINATION_MANUAL:'manual',
         BACKUP_DESTINATION_STORAGE_KEY:'destination', manualExportFolder:'D:/Manual', exportFolder:null,
         refreshResolvedBackupDestination:async () => context.updateDestinationButtonLabel()});
     for (const name of ['getBackupDestinationInputs','getSelectedBackupDestination','updateDestinationButtonLabel','bindBackupDestinationInputs']) {
         vm.runInContext(source.match(new RegExp('^function ' + name + '\\([^\\n]*\\).*?^}', 'ms'))[0],context);
     }
     context.bindBackupDestinationInputs();
-    for (const mode of ['manual','projectRoot','ftp']) {
+    for (const mode of ['manual','projectRoot','parentFolder','ftp']) {
         elements.backupDestinationSelect.value=mode;
         elements.backupDestinationSelect.events.change();
         assert.equal(context.getSelectedBackupDestination(),mode);

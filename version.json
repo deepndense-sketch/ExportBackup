@@ -1,5 +1,5 @@
 {
-  "version": "4.7.6",
+  "version": "4.8.0",
   "channel": "main",
-  "notes": "Release 4.7.6 keeps the existing backup video track visible during Re-backup so the rendered video is reused. Only higher video tracks are hidden. The old backup remains until the new export is ready, and original track visibility is restored afterward."
+  "notes": "Release 4.8.0 adds a Parent Folder destination that creates or reuses BACKUP one level above the Premiere project folder. A new update notice and Later/Update now popup install updates directly into CEP without manual ZIP extraction. Updates are blocked while exporting or collecting media."
 }

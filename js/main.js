@@ -34,6 +34,7 @@ const REBACKUP_RECOVERY_STABLE_WAIT_MS = 2000;
 const CLEANUP_RETRY_INTERVAL_MS = 3000;
 const BACKUP_DESTINATION_FTP = "ftp";
 const BACKUP_DESTINATION_PROJECT_ROOT = "projectRoot";
+const BACKUP_DESTINATION_PARENT_FOLDER = "parentFolder";
 const BACKUP_DESTINATION_MANUAL = "manual";
 const FTP_BACKUP_ROOT = "Y:\\@ Backup";
 const BACKUP_CATEGORIES = [
@@ -192,12 +193,16 @@ function getBackupDestinationInputs() {
     return {
         ftp: document.getElementById("backupDestinationFtp"),
         projectRoot: document.getElementById("backupDestinationProjectRoot"),
+        parentFolder: document.getElementById("backupDestinationParentFolder"),
         manual: document.getElementById("backupDestinationManual")
     };
 }
 
 function getSelectedBackupDestination() {
     const inputs = getBackupDestinationInputs();
+    if (inputs.parentFolder && inputs.parentFolder.checked) {
+        return BACKUP_DESTINATION_PARENT_FOLDER;
+    }
     if (inputs.projectRoot && inputs.projectRoot.checked) {
         return BACKUP_DESTINATION_PROJECT_ROOT;
     }
@@ -315,6 +320,54 @@ function setUpdateButton(label, isUpdateAvailable, hoverText) {
     } else {
         button.classList.remove("update-ready");
         button.classList.add("secondary");
+    }
+    const notice = document.getElementById('updateNotice');
+    if (notice) {
+        notice.hidden = !isUpdateAvailable;
+        document.getElementById('updateNoticeText').textContent = `Backup Project ${remoteVersion} is available`;
+    }
+}
+
+let promptedUpdateVersion = '';
+let updatePromptPreviousFocus = null;
+
+function isUpdateWorkBusy() {
+    if (busy) return true;
+    const collector = document.getElementById('collectorPanel');
+    try { return !!(collector && collector.contentWindow && collector.contentWindow.isCollectorBusy && collector.contentWindow.isCollectorBusy()); }
+    catch (error) { return true; }
+}
+
+function showUpdatePrompt(automatic) {
+    if (!remoteVersion || compareVersions(remoteVersion, localVersion) <= 0 || isUpdateWorkBusy()) return;
+    if (automatic && promptedUpdateVersion === remoteVersion) return;
+    const prompt = document.getElementById('updatePrompt');
+    if (!prompt || !prompt.classList.contains('is-hidden')) return;
+    promptedUpdateVersion = remoteVersion;
+    updatePromptPreviousFocus = document.activeElement;
+    document.getElementById('updatePromptTitle').textContent = `Backup Project ${remoteVersion} is available`;
+    prompt.classList.remove('is-hidden');
+    document.getElementById('updateLaterButton').focus();
+}
+
+function closeUpdatePrompt() {
+    document.getElementById('updatePrompt').classList.add('is-hidden');
+    if (updatePromptPreviousFocus && updatePromptPreviousFocus.focus) updatePromptPreviousFocus.focus();
+}
+
+function installPromptedUpdate() {
+    if (isUpdateWorkBusy()) return;
+    closeUpdatePrompt();
+    runGithubUpdate();
+}
+
+function handleUpdatePromptKey(event) {
+    if (event.key === 'Escape') { event.preventDefault(); closeUpdatePrompt(); }
+    if (event.key === 'Tab') {
+        event.preventDefault();
+        const later = document.getElementById('updateLaterButton');
+        const install = document.getElementById('updateInstallButton');
+        (document.activeElement === later ? install : later).focus();
     }
 }
 
@@ -998,6 +1051,7 @@ async function checkForUpdates() {
 
         if (compareVersions(remoteVersion, localVersion) > 0) {
             setUpdateButton(`Update to ${remoteVersion}`, true, remoteVersionNotes);
+            showUpdatePrompt(true);
         } else {
             setUpdateButton(`Latest Version ${localVersion}`, false, localVersionNotes);
         }
@@ -1105,7 +1159,7 @@ function buildUpdaterLaunchCommand(scriptPath, zipPath, destination, resultPath,
 }
 
 function runGithubUpdate() {
-    if (busy) {
+    if (isUpdateWorkBusy()) {
         return;
     }
 
@@ -1206,6 +1260,8 @@ function loadSavedPaths() {
         const destinationInputs = getBackupDestinationInputs();
         if (savedDestination === BACKUP_DESTINATION_PROJECT_ROOT && destinationInputs.projectRoot) {
             destinationInputs.projectRoot.checked = true;
+        } else if (savedDestination === BACKUP_DESTINATION_PARENT_FOLDER && destinationInputs.parentFolder) {
+            destinationInputs.parentFolder.checked = true;
         } else if (savedDestination === BACKUP_DESTINATION_MANUAL && destinationInputs.manual) {
             destinationInputs.manual.checked = true;
         } else if (destinationInputs.ftp) {
@@ -1630,8 +1686,9 @@ async function resolveProjectBackupFolder(options) {
 
     let parsedName = null;
     let folderPath;
-    if (destinationMode === BACKUP_DESTINATION_PROJECT_ROOT) {
-        folderPath = path.join(path.dirname(projectInfo.projectPath), "BACKUP");
+    if (destinationMode === BACKUP_DESTINATION_PROJECT_ROOT || destinationMode === BACKUP_DESTINATION_PARENT_FOLDER) {
+        const projectDirectory = path.dirname(projectInfo.projectPath);
+        folderPath = path.join(destinationMode === BACKUP_DESTINATION_PARENT_FOLDER ? path.dirname(projectDirectory) : projectDirectory, "BACKUP");
         if (settings.create !== false) {
             fs.mkdirSync(folderPath, { recursive: true });
         } else if (settings.requireExisting === true && !fs.existsSync(folderPath)) {

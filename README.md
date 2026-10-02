@@ -1,6 +1,8 @@
 # Backup Project User Manual
 
-**Current release 4.7.6:** Re-backup accepts the selected track containing a single existing backup MP4 even if its duration differs from the current sequence. It keeps that video track visible to reuse the rendered backup and hides only higher video tracks. Recorded backup audio is muted so source audio is exported. The old clip remains until the replacement is ready, and original track visibility is restored afterward. Normal Backup still requires an empty target.
+**Current release 4.8.0:** The Path dropdown adds **Parent Folder**: `D:\Show\Project\Edit.prproj` exports into `D:\Show\BACKUP`, creating the folder if needed or reusing it. Update availability now appears as a notice and a popup with **Later** and **Update now**. Update now installs directly into CEP; save your project first and restart Premiere after installation. Updates are blocked while exporting or collecting media.
+
+Re-backup accepts the selected track containing a single existing backup MP4 even if its duration differs from the current sequence. It keeps that video track visible to reuse the rendered backup and hides only higher video tracks. Recorded backup audio is muted so source audio is exported. The old clip remains until the replacement is ready, and original track visibility is restored afterward. Normal Backup still requires an empty target.
 
 Since **4.7.4**, a one-time repair is available for older installations with the broken updater: close Premiere, extract the repair ZIP, and double-click `repair-update.cmd`. Keep `repair-update.ps1` beside it. The repair downloads the latest GitHub package, verifies copied files, and moves confirmed duplicate installations outside CEP. Open Premiere afterward and use the plugin's Update button for future updates. Includes the 4.7.3 updater path fix and 4.7.2 backup recognition fix. Unrelated occupied video tracks remain protected.
 

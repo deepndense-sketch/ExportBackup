@@ -2262,6 +2262,8 @@ async function addCurrentActiveSequence() {
     }
 }
 
+function isCollectorBusy() { return isCopying; }
+
 let trackLockPollRunning = false;
 let trackLockPollTimer = null;
 

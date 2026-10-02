@@ -1,6 +1,6 @@
 # Backup Project User Manual
 
-**Current release 4.8.0:** The Path dropdown adds **Parent Folder**: `D:\Show\Project\Edit.prproj` exports into `D:\Show\BACKUP`, creating the folder if needed or reusing it. Update availability now appears as a notice and a popup with **Later** and **Update now**. Update now installs directly into CEP; save your project first and restart Premiere after installation. Updates are blocked while exporting or collecting media.
+**Current release 4.8.1:** The Solo reminder sits slightly closer to Tracks to back up, without moving the heading or other controls. The Path dropdown includes **Parent Folder**: `D:\Show\Project\Edit.prproj` exports into `D:\Show\BACKUP`, creating the folder if needed or reusing it. Update availability appears as a notice and a popup with **Later** and **Update now**. Update now installs directly into CEP; save your project first and restart Premiere after installation. Updates are blocked while exporting or collecting media.
 
 Re-backup accepts the selected track containing a single existing backup MP4 even if its duration differs from the current sequence. It keeps that video track visible to reuse the rendered backup and hides only higher video tracks. Recorded backup audio is muted so source audio is exported. The old clip remains until the replacement is ready, and original track visibility is restored afterward. Normal Backup still requires an empty target.
 

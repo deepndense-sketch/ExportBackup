@@ -1,0 +1,11 @@
+Backup Project - one-time update repair
+
+1. Close Adobe Premiere Pro.
+2. Extract this ZIP into a folder.
+3. Double-click repair-update.cmd. Keep repair-update.ps1 beside it.
+4. Wait for "Installed and verified". Internet access is required.
+5. Open Premiere Pro and Backup Project.
+
+Future updates use the plugin's Update button.
+The repair keeps copies of duplicate installations outside the CEP folder.
+If repair fails, keep the window's error message and contact the plugin author.

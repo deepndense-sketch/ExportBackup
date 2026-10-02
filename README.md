@@ -1,6 +1,6 @@
 # Backup Project User Manual
 
-Current release: **4.7.3**. Fixes updater handling of paths containing spaces, including the installed `Backup Project` folder. If an older updater installed into `Backup` instead, install this release once using `deploy_extension.bat` and remove the duplicate installation after confirming its identity. Restart Premiere afterward. Includes 4.7.2's recognition fix for existing backup filenames and MP4 audio-only backup discovery. Unrelated occupied video tracks remain protected.
+Current release: **4.7.4**. Includes a one-time repair for older installations with the broken updater: close Premiere, extract the repair ZIP, and double-click `repair-update.cmd`. Keep `repair-update.ps1` beside it. The repair downloads the latest GitHub package, verifies copied files, and moves confirmed duplicate installations outside CEP. Open Premiere afterward and use the plugin's Update button for future updates. Includes the 4.7.3 updater path fix and 4.7.2 backup recognition fix. Unrelated occupied video tracks remain protected.
 
 Backup Project includes Export Backup and Project Collector. Export Backup makes a backup MP4 and separate audio exports from the active Premiere Pro sequence, then brings them back into the project and lines them up.
 

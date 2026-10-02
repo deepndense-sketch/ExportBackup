@@ -1,5 +1,5 @@
 {
-  "version": "4.7.3",
+  "version": "4.7.4",
   "channel": "main",
-  "notes": "Release 4.7.3 fixes updater argument quoting so Backup Project is not truncated to Backup. Includes the 4.7.2 existing-backup recognition fix. Install this release once using deploy_extension.bat if the older updater installed into the wrong folder."
+  "notes": "Release 4.7.4 adds a one-time repair launcher for older installations with the broken updater. It downloads the latest release, verifies copied files, and preserves duplicate installations outside CEP. Includes the updater and existing-backup recognition fixes."
 }

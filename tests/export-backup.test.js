@@ -290,6 +290,33 @@ test('Align Existing bypasses destination naming and passes discovered paths to 
     assert.deepEqual(Array.from(aligned.options.manifest.expectedFiles,entry => entry.path),['D:/Old_BACKUP.mp4','E:/Old_Track1.wav']);
 });
 
+test('URI-encoded Premiere filenames reuse V7 and recognize MP4 audio-only backups', () => {
+    const mediaPath = 'D:/Backups/Current Show_BACKUP.mp4';
+    const video = makeTimedClip('Current Show_BACKUP.mp4',60,mediaPath);
+    const audio = makeTimedClip('Current Show_BACKUP.mp4',60,mediaPath);
+    const sequence = makeTimedSequence([makeTrack(0,[audio])],
+        Array.from({length:7},(_,i) => makeTrack(0,i === 6 ? [video] : [])));
+    const {context} = loadHostLogic(null,{File:function(value) {
+        this.fsName = String(value).replace(/\//g,'\\');
+        this.name = encodeURIComponent(this.fsName.split('\\').pop());
+        this.exists = true;
+    }});
+    context.app.project.activeSequence = sequence;
+    const layout = context.ebResolveExistingBackupLayout(sequence,sequence.name,7);
+    assert.equal(layout.baseName,sequence.name);
+    assert.equal(layout.video.targetTrackNumber,7);
+    assert.equal(layout.backupAudio.targetTrackNumber,1);
+    assert.doesNotThrow(() => context.ebValidateBackupTrack(sequence,7,true,layout.baseName));
+    assert.equal(sequence.videoTracks[6].clips.numItems,1,'discovery must retain old backup');
+    sequence.videoTracks[6] = makeTrack(0);
+    const audioOnly = context.ebResolveExistingBackupLayout(sequence,sequence.name,7);
+    assert.equal(audioOnly.video.mediaPath,context.ebGetManagedClipFinalMediaPath(audio));
+    assert.equal(audioOnly.video.targetTrackNumber,0);
+    assert.equal(audioOnly.backupAudio.targetTrackNumber,1);
+    sequence.videoTracks[6] = makeTrack(0,[makeTimedClip('Unrelated.mp4',60,'D:/Unrelated.mp4')]);
+    assert.throws(() => context.ebValidateBackupTrack(sequence,7,true,sequence.name),/V7 is not empty/);
+});
+
 test('mixed source tracks remain selectable, audible, and untouched by backup cleanup', () => {
     const source = makeTimedClip('WOW 1900 The Apology of Socrates_BACKUP.mp4', 7.274,
         'D:/LocalTests/WOW 1900 The Apology of Socrates_BACKUP.mp4');

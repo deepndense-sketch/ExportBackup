@@ -16,7 +16,7 @@ if (-not $ResultPath -or -not $ResultPath.Trim()) {
 }
 
 if (-not $Destination -or -not $Destination.Trim()) {
-    $Destination = Join-Path $env:APPDATA "Adobe\CEP\extensions\ExportBackup"
+    $Destination = Join-Path $env:APPDATA "Adobe\CEP\extensions\Backup Project"
 }
 
 function Write-Step($message) {

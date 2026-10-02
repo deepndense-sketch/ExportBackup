@@ -3,7 +3,7 @@ setlocal
 
 set "SRC=%~dp0"
 if "%SRC:~-1%"=="\" set "SRC=%SRC:~0,-1%"
-set "DEST=%APPDATA%\Adobe\CEP\extensions\ExportBackup"
+set "DEST=%APPDATA%\Adobe\CEP\extensions\Backup Project"
 set "RC=0"
 
 title ExportBackup Deploy

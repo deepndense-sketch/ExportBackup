@@ -289,6 +289,12 @@ function ebNormalizeName(value) {
     return String(value || "").toLowerCase();
 }
 
+function ebMediaFileName(mediaPath) {
+    // ExtendScript File.name is URI-encoded; fsName is the native filename.
+    var nativePath = String(new File(mediaPath).fsName || mediaPath || "");
+    return nativePath.substring(Math.max(nativePath.lastIndexOf("/"), nativePath.lastIndexOf("\\")) + 1);
+}
+
 function ebStripExtension(value) {
     var text = String(value || "");
     var lastSlash = Math.max(text.lastIndexOf("\\"), text.lastIndexOf("/"));
@@ -406,7 +412,7 @@ function ebGetBackupTrackCandidate(sequence, track, baseName) {
     }
     var mediaPath = ebGetManagedClipFinalMediaPath(clip);
     var displayName = ebGetClipDisplayName(clip);
-    var names = [mediaPath ? String(new File(mediaPath).name || "") : "", displayName];
+    var names = [mediaPath ? ebMediaFileName(mediaPath) : "", displayName];
     for (var n = 0; n < names.length; n++) {
         var stem = ebNormalizeManagedName(names[n]).replace(/_rebkp_temp$/, "");
         var match = stem.match(/^(.+)_(backup|track(\d+(?:-\d+)*))$/);
@@ -794,7 +800,7 @@ function ebIsSequenceManagedBackupClip(clip, baseName) {
 
     try {
         var finalMediaPath = ebGetManagedClipFinalMediaPath(clip);
-        var mediaFileName = finalMediaPath ? String((new File(finalMediaPath)).name || "") : "";
+        var mediaFileName = finalMediaPath ? ebMediaFileName(finalMediaPath) : "";
         return ebIsSequenceManagedBackupTrack(mediaFileName, baseName);
     } catch (e) {
         return false;
@@ -807,7 +813,7 @@ function ebIsManagedBackupClip(clip, baseName) {
 
     try {
         var finalMediaPath = ebGetManagedClipFinalMediaPath(clip);
-        var mediaFileName = finalMediaPath ? String((new File(finalMediaPath)).name || "") : "";
+        var mediaFileName = finalMediaPath ? ebMediaFileName(finalMediaPath) : "";
         return ebIsManagedBackupTrack(mediaFileName, baseName);
     } catch (e) {
         return false;
@@ -3041,7 +3047,7 @@ function ebResolveExistingBackupLayout(sequence, baseName, preferredTrack) {
         try { mediaPath = item.getMediaPath(); } catch (e) {}
         if (!mediaPath) return;
         var finalPath = ebStripRebackupPreservedMarkerFromPath(ebStripRebackupTempMarkerFromPath(mediaPath));
-        var match = ebNormalizeManagedName(String(new File(finalPath).name)).match(/^(.+)_(backup|track(\d+(?:-\d+)*))$/);
+        var match = ebNormalizeManagedName(ebMediaFileName(finalPath)).match(/^(.+)_(backup|track(\d+(?:-\d+)*))$/);
         if (!match || match[1] !== ebNormalizeName(identity)) return;
         var key = match[2];
         var entry = {mediaPath: finalPath, currentMediaPath: mediaPath, targetTrackNumber: 0, startSeconds: 0, startTicks: ''};
@@ -3109,6 +3115,16 @@ function ebResolveExistingBackupLayout(sequence, baseName, preferredTrack) {
         if (projectMatches[key].length > 1) throw new Error('Multiple existing backup files match ' + identity + '_' + key + '. Keep the intended backup in the active sequence before Re-backup.');
         if (key === 'backup') layout.video = projectMatches[key][0];
         else layout.audioOutputs.push(projectMatches[key][0]);
+    }
+    // The MP4's audio clip is also a valid anchor when its video was removed.
+    if (!layout.video && layout.backupAudio) {
+        layout.video = {
+            mediaPath: layout.backupAudio.mediaPath,
+            currentMediaPath: layout.backupAudio.currentMediaPath,
+            targetTrackNumber: 0,
+            startSeconds: layout.backupAudio.startSeconds,
+            startTicks: layout.backupAudio.startTicks
+        };
     }
     return layout;
 }

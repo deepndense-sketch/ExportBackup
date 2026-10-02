@@ -1528,7 +1528,7 @@ function pcEbGetBackupTrackCandidate(sequence, track, baseName) {
     }
     var mediaPath = pcEbGetManagedClipFinalMediaPath(clip);
     var displayName = pcEbGetClipDisplayName(clip);
-    var names = [mediaPath ? String(new File(mediaPath).name || "") : "", displayName];
+    var names = [mediaPath ? pcEbMediaFileName(mediaPath) : "", displayName];
     for (var n = 0; n < names.length; n++) {
         var stem = pcEbNormalizeManagedName(names[n]).replace(/_rebkp_temp$/, "");
         var match = stem.match(/^(.+)_(backup|track(\d+(?:-\d+)*))$/);
@@ -1594,6 +1594,12 @@ function pcEbToFsPath(path) {
     } catch (e) {}
 
     return String(path).split("/").join("\\");
+}
+
+function pcEbMediaFileName(mediaPath) {
+    // ExtendScript File.name is URI-encoded; fsName is the native filename.
+    var nativePath = String(new File(mediaPath).fsName || mediaPath || "");
+    return nativePath.substring(Math.max(nativePath.lastIndexOf("/"), nativePath.lastIndexOf("\\")) + 1);
 }
 
 function pcEbNormalizeManagedName(value) {

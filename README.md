@@ -1,5 +1,7 @@
 # Backup Project User Manual
 
+Current release: **4.7.2**. Fixes recognition of existing backup filenames containing spaces or other URI-encoded characters, so Re-backup can reuse their video track. A remaining backup MP4 audio clip also identifies the existing output when its video clip was removed. Unrelated occupied video tracks remain protected.
+
 Backup Project includes Export Backup and Project Collector. Export Backup makes a backup MP4 and separate audio exports from the active Premiere Pro sequence, then brings them back into the project and lines them up.
 
 Version **4.7.0** keeps Backup, Re-backup, and Align Existing visible, with More settings expanded by default. Project Root exports go into a `BACKUP` folder. Re-backup and Align Existing use discovered backup locations independently of the selected new-backup destination. Align Existing also cleans up recognized obsolete backup files when they are unused and a replacement exists.

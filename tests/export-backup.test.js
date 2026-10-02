@@ -1078,10 +1078,10 @@ test('video visibility is restored exactly after export-only hiding', () => {
     assert.match(source, /finally\s*\{[\s\S]*ebRestoreVideoMuteStates\(sequence, originalVideoMuteStates\)/);
 });
 
-test('rebackup reuses occupied V7 after sequence duration changes and hides it during export', () => {
+for (const backupTrack of [1, 3, 7]) test(`rebackup keeps V${backupTrack} visible and hides only higher tracks`, () => {
     const video = makeTimedClip('Old Show_BACKUP.mp4',40,'D:/Backups/Old Show_BACKUP.mp4');
     const audio = makeTimedClip('Old Show_BACKUP.mp4',40,'D:/Backups/Old Show_BACKUP.mp4');
-    const videoTracks = Array.from({length:9},(_,i) => makeTrack(0,i === 6 ? [video] : []));
+    const videoTracks = Array.from({length:9},(_,i) => makeTrack(0,i === backupTrack - 1 ? [video] : []));
     const sequence = makeTimedSequence([makeTrack(0,[makeTimedClip('Dialogue.wav',60)]),makeTrack(0,[audio])],videoTracks);
     const {context} = loadHostLogic();
     context.app.project.activeSequence = sequence;
@@ -1093,26 +1093,26 @@ test('rebackup reuses occupied V7 after sequence duration changes and hides it d
     let exports = 0;
     context.ebExportSequenceDirect = () => {
         exports++;
-        assert.deepEqual(videoTracks.map(t => t.muteValue),[0,0,0,0,0,0,1,1,1]);
+        assert.deepEqual(videoTracks.map(t => t.muteValue),videoTracks.map((_,i) => i >= backupTrack ? 1 : 0));
         assert.equal(sequence.audioTracks[1].muteValue,1);
         assert.equal(sequence.audioTracks[0].muteValue,0);
-        assert.equal(videoTracks[6].clips.numItems,1,'old clip must remain during rendering');
+        assert.equal(videoTracks[backupTrack - 1].clips.numItems,1,'old clip must remain during rendering');
     };
     const selection = JSON.stringify({includeVideo:true,audioTracks:[]});
-    const validation = JSON.parse(context.exportBackup.validateBackupExportSettings(7,'D:/Backups','video.epr','mp3.epr','wav.epr','wav',selection,true,false));
+    const validation = JSON.parse(context.exportBackup.validateBackupExportSettings(backupTrack,'D:/Backups','video.epr','mp3.epr','wav.epr','wav',selection,true,false));
     assert.equal(validation.ok,true,validation.message);
-    const result = JSON.parse(context.exportBackup.runBackupQueue('D:/Backups','video.epr','mp3.epr','wav.epr','wav',7,false,selection,'premiere',true,false));
+    const result = JSON.parse(context.exportBackup.runBackupQueue('D:/Backups','video.epr','mp3.epr','wav.epr','wav',backupTrack,false,selection,'premiere',true,false));
     assert.equal(result.ok,true,result.message);
     assert.equal(exports,1);
-    assert.equal(result.rebackupLayout.video.targetTrackNumber,7);
+    assert.equal(result.rebackupLayout.video.targetTrackNumber,backupTrack);
     assert.equal(result.rebackupLayout.backupAudio.targetTrackNumber,2);
     assert.deepEqual(videoTracks.map(t => t.muteValue),[0,0,0,0,0,0,0,0,0]);
-    assert.throws(() => context.ebValidateBackupTrack(sequence,7,false,sequence.name),/not empty/);
+    assert.throws(() => context.ebValidateBackupTrack(sequence,backupTrack,false,sequence.name),/not empty/);
     context.ebExportSequenceDirect = () => {throw new Error('render failed');};
-    const failure = JSON.parse(context.exportBackup.runBackupQueue('D:/Backups','video.epr','mp3.epr','wav.epr','wav',7,false,selection,'premiere',true,false));
+    const failure = JSON.parse(context.exportBackup.runBackupQueue('D:/Backups','video.epr','mp3.epr','wav.epr','wav',backupTrack,false,selection,'premiere',true,false));
     assert.equal(failure.ok,false);
     assert.match(failure.message,/render failed/);
-    assert.equal(videoTracks[6].clips.numItems,1);
+    assert.equal(videoTracks[backupTrack - 1].clips.numItems,1);
     assert.deepEqual(videoTracks.map(t => t.muteValue),[0,0,0,0,0,0,0,0,0]);
 });
 

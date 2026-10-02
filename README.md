@@ -1,8 +1,8 @@
 # Backup Project User Manual
 
-**4.7.5:** Re-backup accepts the selected track containing a single existing backup MP4 even if its duration differs from the current sequence. It hides that video track and all higher tracks and mutes its recorded backup audio during rendering. The old clip remains until the replacement is ready. Normal Backup still requires an empty target.
+**Current release 4.7.6:** Re-backup accepts the selected track containing a single existing backup MP4 even if its duration differs from the current sequence. It keeps that video track visible to reuse the rendered backup and hides only higher video tracks. Recorded backup audio is muted so source audio is exported. The old clip remains until the replacement is ready, and original track visibility is restored afterward. Normal Backup still requires an empty target.
 
-Current release: **4.7.4**. Includes a one-time repair for older installations with the broken updater: close Premiere, extract the repair ZIP, and double-click `repair-update.cmd`. Keep `repair-update.ps1` beside it. The repair downloads the latest GitHub package, verifies copied files, and moves confirmed duplicate installations outside CEP. Open Premiere afterward and use the plugin's Update button for future updates. Includes the 4.7.3 updater path fix and 4.7.2 backup recognition fix. Unrelated occupied video tracks remain protected.
+Since **4.7.4**, a one-time repair is available for older installations with the broken updater: close Premiere, extract the repair ZIP, and double-click `repair-update.cmd`. Keep `repair-update.ps1` beside it. The repair downloads the latest GitHub package, verifies copied files, and moves confirmed duplicate installations outside CEP. Open Premiere afterward and use the plugin's Update button for future updates. Includes the 4.7.3 updater path fix and 4.7.2 backup recognition fix. Unrelated occupied video tracks remain protected.
 
 Backup Project includes Export Backup and Project Collector. Export Backup makes a backup MP4 and separate audio exports from the active Premiere Pro sequence, then brings them back into the project and lines them up.
 

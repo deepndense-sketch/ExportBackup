@@ -3740,7 +3740,8 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
             var videoPath = videoRequest ? videoRequest.path : "";
             var hiddenVideoTrackCount = ebHideVideoTracksAbove(sequence, resolvedBackupVideoTrackNumber);
             if (shouldRebackup && rebackupLayout && rebackupLayout.video && rebackupLayout.video.targetTrackNumber > 0) {
-                sequence.videoTracks[resolvedBackupVideoTrackNumber - 1].setMute(1);
+                // Reuse the rendered backup video; only higher tracks are hidden.
+                sequence.videoTracks[resolvedBackupVideoTrackNumber - 1].setMute(0);
             }
             ebClearAllAudioSoloStates(sequence);
             if (resolvedExportMode === "premiere") {

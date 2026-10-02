@@ -1,5 +1,5 @@
 {
-  "version": "4.7.4",
+  "version": "4.7.5",
   "channel": "main",
-  "notes": "Release 4.7.4 adds a one-time repair launcher for older installations with the broken updater. It downloads the latest release, verifies copied files, and preserves duplicate installations outside CEP. Includes the updater and existing-backup recognition fixes."
+  "notes": "Release 4.7.5 lets Re-backup reuse the selected existing backup MP4 track even when the sequence duration has changed. The backup video track and all tracks above it are hidden while rendering, linked backup audio is muted, and the old clip stays until replacement is ready. Normal Backup still requires an empty target."
 }

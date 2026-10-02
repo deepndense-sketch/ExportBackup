@@ -856,6 +856,18 @@ function ebAddClipStartInfo(target, clip) {
     return target;
 }
 
+function ebGetExplicitRebackupCandidate(track, baseName) {
+    if (!track || !track.clips || track.clips.numItems !== 1) return null;
+    var clip = track.clips[0];
+    var mediaPath = ebGetManagedClipFinalMediaPath(clip);
+    if (!mediaPath) return null;
+    var match = ebNormalizeManagedName(ebMediaFileName(mediaPath)).replace(/_rebkp_temp$/, "").match(/^(.+)_(backup|track(\d+(?:-\d+)*))$/);
+    if (!match) return null;
+    return {baseName: match[1], exactName: match[1] === ebNormalizeName(baseName),
+        kind: match[2] === 'backup' ? 'video' : 'audio',
+        trackNumbers: match[3] ? ebNormalizeTrackGroup(match[3].split('-')) : []};
+}
+
 function ebCaptureRebackupLayout(sequence, baseName, preferredVideoTrackNumber) {
     var layout = {
         video: null,
@@ -864,6 +876,10 @@ function ebCaptureRebackupLayout(sequence, baseName, preferredVideoTrackNumber) 
     };
     var seenAudioOutputs = {};
     var managedVideoTrackNumber = ebFindManagedBackupVideoTrackNumber(sequence, baseName, preferredVideoTrackNumber);
+    var explicitCandidate = preferredVideoTrackNumber > 0 && sequence.videoTracks[preferredVideoTrackNumber - 1]
+        ? ebGetExplicitRebackupCandidate(sequence.videoTracks[preferredVideoTrackNumber - 1], baseName) : null;
+    if (explicitCandidate && explicitCandidate.kind !== 'video') explicitCandidate = null;
+    if (explicitCandidate && explicitCandidate.kind === 'video') managedVideoTrackNumber = preferredVideoTrackNumber;
     var i;
     var j;
 
@@ -875,7 +891,8 @@ function ebCaptureRebackupLayout(sequence, baseName, preferredVideoTrackNumber) 
             }
 
             for (j = 0; j < videoTrack.clips.numItems; j++) {
-                var videoCandidate = ebGetBackupTrackCandidate(sequence, videoTrack, baseName);
+                var videoCandidate = explicitCandidate && i + 1 === managedVideoTrackNumber
+                    ? explicitCandidate : ebGetBackupTrackCandidate(sequence, videoTrack, baseName);
                 if (
                     videoCandidate && videoCandidate.kind === "video" &&
                     (videoCandidate.exactName || i + 1 === managedVideoTrackNumber)
@@ -901,9 +918,10 @@ function ebCaptureRebackupLayout(sequence, baseName, preferredVideoTrackNumber) 
             for (j = 0; j < audioTrack.clips.numItems; j++) {
                 var audioClip = audioTrack.clips[j];
                 var clipName = ebGetClipDisplayName(audioClip);
-                var audioCandidate = ebGetBackupTrackCandidate(sequence, audioTrack, baseName);
+                var audioCandidate = explicitCandidate ? ebGetExplicitRebackupCandidate(audioTrack, baseName)
+                    : ebGetBackupTrackCandidate(sequence, audioTrack, baseName);
                 var selectedVideoCandidate = managedVideoTrackNumber > 0
-                    ? ebGetBackupTrackCandidate(sequence, sequence.videoTracks[managedVideoTrackNumber - 1], baseName)
+                    ? (explicitCandidate || ebGetBackupTrackCandidate(sequence, sequence.videoTracks[managedVideoTrackNumber - 1], baseName))
                     : null;
                 if (!audioCandidate || !(audioCandidate.exactName ||
                     (selectedVideoCandidate && audioCandidate.baseName === selectedVideoCandidate.baseName))) {
@@ -2105,6 +2123,8 @@ function ebValidateBackupTrack(sequence, backupVideoTrackNumber, allowManagedBac
     }
 
     if (ebTrackHasClips(sequence.videoTracks[resolved - 1])) {
+        var existing = allowManagedBackup ? ebGetExplicitRebackupCandidate(sequence.videoTracks[resolved - 1], baseName) : null;
+        if (existing && existing.kind === 'video' && existing.exactName) return;
         if (allowManagedBackup && ebGetTrackSequenceManagedInfo(sequence.videoTracks[resolved - 1], baseName, sequence).hasBackup) {
             return;
         }
@@ -3034,6 +3054,9 @@ function ebResolveExistingBackupLayout(sequence, baseName, preferredTrack) {
     }
     if (!exact && names.length === 1) identity = names[0];
     else if (!exact && names.length === 0 && audioIdentities.length === 1) identity = audioIdentities[0];
+    var explicitCandidate = preferredTrack > 0 && sequence.videoTracks[preferredTrack - 1]
+        ? ebGetExplicitRebackupCandidate(sequence.videoTracks[preferredTrack - 1], baseName) : null;
+    if (explicitCandidate && explicitCandidate.kind === 'video') identity = explicitCandidate.exactName ? baseName : explicitCandidate.baseName;
     var layout = ebCaptureRebackupLayout(sequence, identity, preferredTrack || 0);
     layout.baseName = identity;
     var projectMatches = {};
@@ -3696,6 +3719,14 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
 
         ebSetAllTrackMutes(sequence, 0);
         ebApplyManagedTrackMutePolicy(sequence, sequenceName);
+        if (shouldRebackup && rebackupLayout) {
+            var backupAudioEntries = rebackupLayout.audioOutputs.slice();
+            if (rebackupLayout.backupAudio) backupAudioEntries.push(rebackupLayout.backupAudio);
+            for (var muteIndex = 0; muteIndex < backupAudioEntries.length; muteIndex++) {
+                var muteTrack = sequence.audioTracks[backupAudioEntries[muteIndex].targetTrackNumber - 1];
+                if (muteTrack && muteTrack.setMute) muteTrack.setMute(1);
+            }
+        }
 
         if (includeBackupVideo) {
             var videoRequest = null;
@@ -3708,6 +3739,9 @@ exportBackup.runBackupQueue = function (folderPath, videoPresetPath, mp3PresetPa
 
             var videoPath = videoRequest ? videoRequest.path : "";
             var hiddenVideoTrackCount = ebHideVideoTracksAbove(sequence, resolvedBackupVideoTrackNumber);
+            if (shouldRebackup && rebackupLayout && rebackupLayout.video && rebackupLayout.video.targetTrackNumber > 0) {
+                sequence.videoTracks[resolvedBackupVideoTrackNumber - 1].setMute(1);
+            }
             ebClearAllAudioSoloStates(sequence);
             if (resolvedExportMode === "premiere") {
                 ebExportSequenceDirect(sequence, videoPath, videoPresetPath, workAreaType);

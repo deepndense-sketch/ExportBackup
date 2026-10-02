@@ -19,6 +19,12 @@ if (-not $Destination -or -not $Destination.Trim()) {
     $Destination = Join-Path $env:APPDATA "Adobe\CEP\extensions\Backup Project"
 }
 
+# Older launchers lost the second word of "Backup Project" in ArgumentList.
+$truncatedDestination = Join-Path $env:APPDATA "Adobe\CEP\extensions\Backup"
+if ([IO.Path]::GetFullPath($Destination).TrimEnd('\') -ieq $truncatedDestination) {
+    $Destination = Join-Path $env:APPDATA "Adobe\CEP\extensions\Backup Project"
+}
+
 function Write-Step($message) {
     Write-Host "[ExportBackup Updater] $message"
     Add-Content -Path $LogPath -Value ("[STEP] " + $message)

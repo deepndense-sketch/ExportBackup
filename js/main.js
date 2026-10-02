@@ -1097,6 +1097,13 @@ async function monitorUpdaterCompletion() {
     setStatus(`Updater finished launching, but this panel still sees version ${localVersion}.\nIf the button stays blue, reopen the panel or restart Premiere Pro and check again.`);
 }
 
+function buildUpdaterLaunchCommand(scriptPath, zipPath, destination, resultPath, logPath) {
+    const quote = value => "'" + String(value).replace(/'/g, "''") + "'";
+    const payload = `& ${quote(scriptPath)} -ZipPath ${quote(zipPath)} -Destination ${quote(destination)} -ResultPath ${quote(resultPath)} -LogPath ${quote(logPath)}`;
+    const encoded = Buffer.from(payload, 'utf16le').toString('base64');
+    return `Start-Process PowerShell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}'`;
+}
+
 function runGithubUpdate() {
     if (busy) {
         return;
@@ -1142,12 +1149,8 @@ function runGithubUpdate() {
         .then(() => {
             setStatus("Launching GitHub updater. Accept the Windows permission prompt if it appears.");
 
-            const escapedScriptPath = tempUpdaterScriptPath.replace(/'/g, "''");
-            const escapedZipPath = tempUpdaterZipPath.replace(/'/g, "''");
-            const userDestination = getUserCepExtensionPath().replace(/'/g, "''");
-            const escapedResultPath = tempUpdaterResultPath.replace(/'/g, "''");
-            const escapedLogPath = tempUpdaterLogPath.replace(/'/g, "''");
-            const command = `Start-Process PowerShell -Verb RunAs -ArgumentList '-NoExit','-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScriptPath}','-ZipPath','${escapedZipPath}','-Destination','${userDestination}','-ResultPath','${escapedResultPath}','-LogPath','${escapedLogPath}'`;
+            const command = buildUpdaterLaunchCommand(tempUpdaterScriptPath, tempUpdaterZipPath,
+                getUserCepExtensionPath(), tempUpdaterResultPath, tempUpdaterLogPath);
 
             childProcess.execFile(
                 "powershell.exe",
@@ -1158,7 +1161,7 @@ function runGithubUpdate() {
                         return;
                     }
 
-                    setStatus(`Updater launched for the CEP extensions folder.\nTarget: ${getUserCepExtensionPath()}\nAn admin PowerShell window should show copy progress and stay open if something fails.`);
+                    setStatus(`Updater launched for the CEP extensions folder.\nTarget: ${getUserCepExtensionPath()}\nWaiting for the update result...`);
                     monitorUpdaterCompletion();
                 }
             );

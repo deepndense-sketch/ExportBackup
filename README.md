@@ -1,6 +1,6 @@
 # Backup Project User Manual
 
-Current release: **4.7.2**. Fixes recognition of existing backup filenames containing spaces or other URI-encoded characters, so Re-backup can reuse their video track. A remaining backup MP4 audio clip also identifies the existing output when its video clip was removed. Unrelated occupied video tracks remain protected.
+Current release: **4.7.3**. Fixes updater handling of paths containing spaces, including the installed `Backup Project` folder. If an older updater installed into `Backup` instead, install this release once using `deploy_extension.bat` and remove the duplicate installation after confirming its identity. Restart Premiere afterward. Includes 4.7.2's recognition fix for existing backup filenames and MP4 audio-only backup discovery. Unrelated occupied video tracks remain protected.
 
 Backup Project includes Export Backup and Project Collector. Export Backup makes a backup MP4 and separate audio exports from the active Premiere Pro sequence, then brings them back into the project and lines them up.
 

@@ -4,6 +4,18 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+test('updater launch preserves spaces, apostrophes, and literal PowerShell characters', () => {
+    const source = fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
+    const context = vm.createContext({Buffer});
+    vm.runInContext(source.slice(source.indexOf('function buildUpdaterLaunchCommand('),source.indexOf('function runGithubUpdate(')),context);
+    const values = ["C:/Users/O'Brien/update.ps1",'C:/Temp/package.zip','C:/CEP/Backup Project','C:/Temp/result.json','C:/Temp/$log.txt'];
+    const command = context.buildUpdaterLaunchCommand(...values);
+    const encoded = command.match(/'-EncodedCommand','([^']+)'/)[1];
+    const payload = Buffer.from(encoded,'base64').toString('utf16le');
+    assert.equal(payload, "& 'C:/Users/O''Brien/update.ps1' -ZipPath 'C:/Temp/package.zip' -Destination 'C:/CEP/Backup Project' -ResultPath 'C:/Temp/result.json' -LogPath 'C:/Temp/$log.txt'");
+    assert.match(command, /-WindowStyle Hidden/);
+});
+
 test('Align Existing discovers old exports and merged-track leftovers without touching unrelated media', async () => {
     const folder = fs.mkdtempSync(path.join(require('node:os').tmpdir(),'backup-cleanup-'));
     try {

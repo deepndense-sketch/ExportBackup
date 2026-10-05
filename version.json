@@ -1,5 +1,5 @@
 {
-  "version": "5.0.2",
+  "version": "5.0.3",
   "channel": "main",
-  "notes": "• Backup video and audio reuse lower tracks that are free within the backup range; clips elsewhere stay untouched.\n• Empty Track shows the planned video track before export.\n• Audio tracks with only disabled clips in the selected range are hidden from the selection list.\n• Alerts now use readable dialogs with wrapping and scrolling for long file paths.\n• Restart Premiere after updating."
+  "notes": "• Fixed a false 'Updater failed / Unknown error' message after a successful update.\n• The panel now waits if the updater result file is still being written.\n• Genuine update failures still show their error details.\n• Restart Premiere after updating."
 }

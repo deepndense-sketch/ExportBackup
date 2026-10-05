@@ -1,6 +1,8 @@
 # Backup Project User Manual
 
-**Current release 5.0.2:** Backup video and audio reuse lower tracks that are free within the backup range, preserving clips outside it. Empty Track previews the planned video track. Audio tracks with only disabled clips in the selected range are hidden from the list. Alerts use readable dialogs with wrapping and scrolling for long paths. Restart Premiere after updating.
+**Current release 5.0.3:** Fixed a false "Updater failed / Unknown error" message after successful updates. The result reader handles Windows PowerShell's UTF-8 encoding marker and retries incomplete result files. Genuine failures still show error details. Restart Premiere after updating; an older panel may still show the old message during this update until restarted.
+
+**Since 5.0.2:** Backup video and audio reuse lower tracks that are free within the backup range, preserving clips outside it. Empty Track previews the planned video track. Audio tracks with only disabled clips in the selected range are hidden from the list. Alerts use readable dialogs with wrapping and scrolling for long paths.
 
 **Since 5.0.1:** The audio selection list follows the marked In/Out range. Tracks shared by an existing main-section backup and teaser music only appear when source audio overlaps the selected section.
 

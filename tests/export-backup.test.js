@@ -4,6 +4,29 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+test('updater reads PowerShell BOM JSON and retries incomplete results without false failure', async () => {
+    const source=fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
+    let contents='\uFEFF{"ok":true,"message":"Update completed successfully."}';
+    const messages=[];
+    const context=vm.createContext({fs:{readFileSync:()=>contents},getTempUpdaterResultPath:()=>'/result.json',
+        getTempUpdaterLogPath:()=>'/update.log',fileExists:()=>true,delay:async()=>{},
+        readVersionInfo(){},checkForUpdates:async()=>{},localVersion:'5.0.2',setStatus:m=>messages.push(m)});
+    vm.runInContext(source.slice(source.indexOf('function readJsonFile('),source.indexOf('function getPositiveIntValue(')),context);
+    vm.runInContext(source.slice(source.indexOf('async function monitorUpdaterCompletion('),source.indexOf('function buildUpdaterLaunchCommand(')),context);
+    assert.equal(context.readJsonFile('/result.json').ok,true);
+    await context.monitorUpdaterCompletion();
+    assert.match(messages.pop(),/Update complete/);
+    let attempts=0;
+    context.delay=async()=>{contents=++attempts===1 ? '{"ok":' : '\uFEFF{"ok":true}';};
+    await context.monitorUpdaterCompletion();
+    assert.equal(attempts,2);assert.match(messages.pop(),/Update complete/);
+    context.delay=async()=>{};contents='\uFEFF{"ok":false,"message":"Access denied"}';
+    await context.monitorUpdaterCompletion();
+    assert.match(messages.pop(),/Updater failed\.\nAccess denied/);
+    contents='invalid';await context.monitorUpdaterCompletion();
+    assert.match(messages.pop(),/completion could not be confirmed/);
+});
+
 test('selection excludes disabled-only audio in range and restores it when enabled', () => {
     const {context}=loadHostLogic();
     const clip=(disabled,start=0,end=60)=>{

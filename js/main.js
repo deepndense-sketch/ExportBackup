@@ -676,7 +676,8 @@ function fileExists(filePath) {
 
 function readJsonFile(filePath) {
     try {
-        return JSON.parse(fs.readFileSync(filePath, "utf8"));
+        // Windows PowerShell writes UTF-8 JSON with a leading byte-order mark.
+        return JSON.parse(fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, ""));
     } catch (error) {
         return null;
     }
@@ -1215,7 +1216,9 @@ async function monitorUpdaterCompletion() {
         if (fileExists(resultPath)) {
             try {
                 const parsed = readJsonFile(resultPath);
-                if (parsed && parsed.ok) {
+                // The writer may still be completing the file. Retry incomplete results.
+                if (!parsed || typeof parsed.ok !== 'boolean') continue;
+                if (parsed.ok) {
                     readVersionInfo(true);
                     await checkForUpdates();
                     setStatus(`Update complete.\nInstalled version: ${localVersion}\nRestart Premiere Pro if the panel was already open.`);
@@ -1223,7 +1226,7 @@ async function monitorUpdaterCompletion() {
                 }
 
                 setStatus(
-                    `Updater failed.\n${(parsed && parsed.message) || "Unknown error."}\n` +
+                    `Updater failed.\n${parsed.message || "The updater reported a failure without details."}\n` +
                     `Log: ${(parsed && parsed.logPath) || getTempUpdaterLogPath()}`
                 );
                 return;
@@ -1242,7 +1245,7 @@ async function monitorUpdaterCompletion() {
         }
     }
 
-    setStatus(`Updater finished launching, but this panel still sees version ${localVersion}.\nIf the button stays blue, reopen the panel or restart Premiere Pro and check again.`);
+    setStatus(`Update completion could not be confirmed.\nThis panel sees version ${localVersion}. Restart Premiere Pro and check again.\nLog: ${getTempUpdaterLogPath()}`);
 }
 
 function buildUpdaterLaunchCommand(scriptPath, zipPath, destination, resultPath, logPath) {

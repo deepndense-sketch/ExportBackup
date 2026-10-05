@@ -124,7 +124,7 @@ let sequenceSessionReset = false;
 let trackPresets = [];
 let trackPresetsLoaded = false;
 let trackPresetIdCounter = 0;
-let sequenceOnlyMode = false;
+let sequenceOnlyMode = true;
 let createReducedProject = false;
 let copyProjectFile = true;
 let linkProjectAfterCollection = false;
@@ -204,12 +204,7 @@ function toggleSourceSection() {
 }
 
 function syncSequenceModeUI() {
-    const sequenceOnlyCheckbox = document.getElementById('sequenceOnlyMode');
     const reducedProjectCheckbox = document.getElementById('createReducedProject');
-
-    if (sequenceOnlyCheckbox) {
-        sequenceOnlyCheckbox.checked = sequenceOnlyMode;
-    }
 
     if (reducedProjectCheckbox) {
         reducedProjectCheckbox.checked = createReducedProject;
@@ -229,21 +224,6 @@ function syncProjectOptionUI() {
         linkProjectCheckbox.checked = linkProjectAfterCollection && copyProjectFile;
         linkProjectCheckbox.disabled = !copyProjectFile;
     }
-}
-
-function toggleSequenceOnlyMode() {
-    sequenceOnlyMode = !!document.getElementById('sequenceOnlyMode').checked;
-    if (!sequenceOnlyMode) {
-        createReducedProject = false;
-    }
-
-    try {
-        localStorage.setItem(SEQUENCE_ONLY_MODE_STORAGE_KEY, sequenceOnlyMode ? '1' : '0');
-        localStorage.setItem(CREATE_REDUCED_PROJECT_STORAGE_KEY, createReducedProject ? '1' : '0');
-    } catch (error) {}
-
-    syncSequenceModeUI();
-    updateSelectionSummary();
 }
 
 function toggleCreateReducedProject() {
@@ -3184,7 +3164,7 @@ function resetResults() {
 function toggleSourceList() {
     listVisible = !listVisible;
     document.getElementById('sourceListBox').style.display = listVisible ? 'block' : 'none';
-    setText('showListButton', listVisible ? 'Hide List' : 'Show List');
+    setText('showListButton', listVisible ? 'Hide list' : 'Show list');
 
     if (listVisible) {
         refreshSourceList();
@@ -3235,7 +3215,7 @@ async function chooseFolder() {
         try {
             localStorage.setItem(DESTINATION_STORAGE_KEY, destination);
         } catch (error) {}
-        setText('summaryText', 'Destination ready. Click BACKUP PROJECT to begin.');
+        setText('summaryText', 'Destination ready. Click Backup project to begin.');
     }
 }
 
@@ -4286,16 +4266,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (savedDestination) {
             destination = savedDestination;
             setText('path', destination);
-            setText('summaryText', 'Saved destination loaded. Click BACKUP PROJECT to begin.');
+            setText('summaryText', 'Saved destination loaded. Click Backup project to begin.');
         }
     } catch (error) {}
 
     document.getElementById('sourceListBox').style.display = 'none';
-    setText('showListButton', 'Show List');
+    setText('showListButton', 'Show list');
     setSourceSectionVisibility(false);
     try {
-        const savedSequenceOnlyMode = localStorage.getItem(SEQUENCE_ONLY_MODE_STORAGE_KEY);
-        sequenceOnlyMode = savedSequenceOnlyMode === null ? true : savedSequenceOnlyMode === '1';
+        // Selected and nested sequence media is always the collection scope.
+        sequenceOnlyMode = true;
         createReducedProject = localStorage.getItem(CREATE_REDUCED_PROJECT_STORAGE_KEY) === '1';
     } catch (error) {
         sequenceOnlyMode = true;

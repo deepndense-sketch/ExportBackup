@@ -811,6 +811,18 @@ body[data-active-tool="export"] { background: #1c1c1d; }
 #exportPanel .backup-action-row { align-items: flex-start; }
 #exportPanel #exportButton { min-width: 130px; }
 #exportPanel .selection-list-button-group { flex-wrap: wrap; }
+/* Let nested grids shrink with the CEP panel instead of using content width. */
+#exportPanel .app, #exportPanel .stack, #exportPanel .field {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+}
+#exportPanel .app > *, #exportPanel .stack > *, #exportPanel .field > * {
+    min-width: 0;
+    max-width: 100%;
+}
+#exportPanel .export-format-row, #exportPanel .track-row {
+    flex-wrap: wrap;
+}
 </style>
 <script src="js/CSInterface.js"></script>
 <script src="js/main.js"></script>

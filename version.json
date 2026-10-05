@@ -1,5 +1,5 @@
 {
-  "version": "5.0.4",
+  "version": "5.0.5",
   "channel": "main",
-  "notes": "• Updates run with PowerShell hidden and show Updating in the panel.\n• Successful updates show a green-check dialog asking you to save your project and restart Premiere.\n• Update failures show readable error details.\n• Completion is confirmed from the updater result, with more time allowed for installation.\n• Restart Premiere after updating."
+  "notes": "• Export Backup fits narrow panels without its inner section overflowing.\n• Project Collector has simpler checkbox options, shorter labels, and consistent sentence case.\n• Path and the green Refresh button are inside the media-selection card, with a divider below Path.\n• Selected and nested sequence media is always collected, subject to ignore settings; its checkbox is no longer shown.\n• Copy project starts checked for new settings and remembers your choice.\n• Restart Premiere after updating."
 }

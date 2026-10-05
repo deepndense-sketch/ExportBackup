@@ -478,16 +478,16 @@ test('panel uses the compact destination labels and places sequence options with
     const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 
     assert.match(html, />Skip files existing here</);
-    assert.match(html, />Choose Path</);
+    assert.match(html, />Choose path</);
     assert.doesNotMatch(html, /1\. Skip Existing Media/);
     assert.doesNotMatch(html, /Files already in this folder are skipped/);
     assert.doesNotMatch(html, /2\. Backup Destination/);
-    assert.match(html, /Lock a track in Premiere to ignore its files\. Click Refresh after making changes to the sequence\./);
+    assert.match(html, /Lock a track in Premiere to ignore its files\./);
     assert.match(html, /Track locks are read from Premiere before copying/);
-    assert.ok(html.indexOf('id="sequenceOnlyMode"') < html.indexOf('id="copyProjectFile"'));
+    assert.doesNotMatch(html, /id="sequenceOnlyMode"/);
     assert.ok(html.indexOf('id="createReducedProject"') < html.indexOf('id="copyProjectFile"'));
     assert.ok(html.indexOf('id="linkProjectAfterCollection"') < html.indexOf('id="collectButton"'));
-    assert.match(html, /id="linkExistingBackupButton"[^>]*>LINK AN EXISTING BACKUP</);
+    assert.match(html, /id="linkExistingBackupButton"[^>]*>Link an existing backup</);
     assert.match(html, /No files are copied again/);
 });
 

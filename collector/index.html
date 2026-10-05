@@ -385,14 +385,14 @@ button:disabled {
     display: flex;
     gap: 10px;
     align-items: flex-start;
-    background: #1c1c1c;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 10px 12px;
+    padding: 3px 0;
+    line-height: 1.5;
+    cursor: pointer;
 }
 
 .option-row input[type="checkbox"] {
-    margin-top: 3px;
+    margin: 4px 0 0;
+    flex-shrink: 0;
 }
 
 .embedded-section {
@@ -1070,6 +1070,14 @@ button:disabled {
 }
 @media (max-width: 700px) { body { min-width: 0; padding: 10px; } .inline-path-row { flex-wrap: wrap; } }
 .collector-path-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.collector-refresh-row { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+#refreshProjectButton {
+    padding: 9px 12px;
+    font-size: 12px;
+    background: rgba(99, 214, 139, 0.14);
+    color: #bdeccc;
+    border-color: rgba(99, 214, 139, 0.24);
+}
 .collector-path-row > label { font-size: 12px; font-weight: 600; color: #b5bdc9; }
 #collectorDestinationSelect { width: auto; min-width: 0; background: #1d2025; color: #edf2f7; border: 1px solid #50545c; border-radius: 7px; padding: 6px 22px 6px 9px; font: inherit; font-size: 12px; }
 .collector-path-value { display: flex; align-items: center; gap: 12px; flex: 1 1 230px; min-width: 0; }
@@ -1173,18 +1181,17 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 </head>
 <body>
 <div class="app">
-    <div class="header-actions">
-        <button id="refreshProjectButton" class="button-secondary button-small" onclick="refreshProject()">Refresh</button>
-    </div>
-
     <section class="grid">
         <div class="card full-width collector-path-card">
+            <div class="collector-refresh-row">
+                <button id="refreshProjectButton" class="button-secondary button-small" onclick="refreshProject()">Refresh</button>
+            </div>
             <div hidden>
                 <input id="categoryDestination" name="collectorDestinationMode" type="radio">
                 <input id="projectRootDestination" name="collectorDestinationMode" type="radio">
                 <input id="manualDestination" name="collectorDestinationMode" type="radio" checked>
             </div>
-            <div class="collector-path-row">
+            <div class="collector-path-row" style="margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--line);">
                 <label for="collectorDestinationSelect">Path</label>
                 <select id="collectorDestinationSelect" onchange="selectCollectorDestination(this.value)">
                     <option value="category">Show / Category</option>
@@ -1192,20 +1199,18 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
                     <option value="manual">Manual Path</option>
                 </select>
                 <div class="collector-path-value">
-                    <button id="chooseButton" class="button-secondary" onclick="chooseFolder()">Choose Path</button>
+                    <button id="chooseButton" class="button-secondary" onclick="chooseFolder()">Choose path</button>
                     <div id="path">No folder selected yet</div>
                 </div>
             </div>
-        </div>
-        <div class="card full-width">
             <div class="section-header-row">
                 <h2 class="card-title" style="margin: 0;">Select or Ignore Media</h2>
                 <button id="toggleIgnoreButton" class="button-secondary section-toggle" onclick="toggleIgnoreSection()">Hide</button>
             </div>
             <div id="ignoreSectionContent" style="display: block;">
-                <p class="selection-note" style="margin-top: 14px;">Lock a track in Premiere to ignore its files. Click Refresh after making changes to the sequence.</p>
+                <p class="selection-note" style="margin-top: 14px;">Lock a track in Premiere to ignore its files.</p>
                 <div class="tree-toolbar">
-                    <button class="button-accent button-small" onclick="addCurrentActiveSequence()">Add Active Sequence</button>
+                    <button class="button-accent button-small" onclick="addCurrentActiveSequence()">Add active sequence</button>
                 </div>
                 <div class="sequence-filter-stack" id="sequenceFilters"></div>
                 <div class="small-note" id="sequenceFilterHint">Track locks are read from Premiere before copying.</div>
@@ -1218,9 +1223,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
                     <div id="sourceSectionContent" style="display: none;">
                         <p class="selection-note">Selecting a drive or folder includes everything inside.</p>
                         <div class="tree-toolbar">
-                            <button id="showListButton" class="button-secondary button-small" onclick="toggleSourceList()">Show List</button>
-                            <button class="button-secondary button-small" onclick="setAllSelections(true)">Include All</button>
-                            <button class="button-secondary button-small" onclick="setAllSelections(false)">Skip All</button>
+                            <button id="showListButton" class="button-secondary button-small" onclick="toggleSourceList()">Show list</button>
+                            <button class="button-secondary button-small" onclick="setAllSelections(true)">Include all</button>
+                            <button class="button-secondary button-small" onclick="setAllSelections(false)">Skip all</button>
                         </div>
                         <div class="path-box" id="selectionSummary">Loading project files from Premiere...</div>
                         <div class="list-box tree-box" id="sourceListBox" style="margin-top: 14px;">
@@ -1245,26 +1250,22 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 
                 <div class="option-stack">
                     <label class="option-row">
-                        <input id="sequenceOnlyMode" type="checkbox" onchange="toggleSequenceOnlyMode()">
-                        <span>Copy media used by selected and nested sequences.</span>
-                    </label>
-                    <label class="option-row">
                         <input id="createReducedProject" type="checkbox" onchange="toggleCreateReducedProject()">
-                        <span>Create a reduced project from selected sequences.</span>
+                        <span>Remove other sequence</span>
                     </label>
                     <label class="option-row">
-                        <input id="copyProjectFile" type="checkbox" onchange="toggleCopyProjectFile()">
-                        <span>Copy Premiere project file after collection and name it BACKUP.</span>
+                        <input id="copyProjectFile" type="checkbox" onchange="toggleCopyProjectFile()" checked>
+                        <span>Copy project</span>
                     </label>
                     <label class="option-row">
                         <input id="linkProjectAfterCollection" type="checkbox" onchange="toggleLinkProjectAfterCollection()">
-                        <span>Link Copied Files.</span>
+                        <span>Link copied files</span>
                     </label>
                 </div>
 
                 <div class="backup-action-row">
-                    <button id="collectButton" class="button-primary" onclick="collect()">BACKUP PROJECT</button>
-                    <button id="linkExistingBackupButton" class="button-secondary" onclick="chooseAndLinkExistingBackup()">LINK AN EXISTING BACKUP</button>
+                    <button id="collectButton" class="button-primary" onclick="collect()">Backup project</button>
+                    <button id="linkExistingBackupButton" class="button-secondary" onclick="chooseAndLinkExistingBackup()">Link an existing backup</button>
                 </div>
                 <div class="small-note backup-link-note">For later linking: open the original project, then select its copied BACKUP project. No files are copied again.</div>
 
@@ -1320,8 +1321,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
         <div class="track-conflict-list" id="trackConflictList"></div>
         <div class="track-conflict-status" id="trackConflictStatus"></div>
         <div class="track-conflict-footer">
-            <button type="button" class="button-secondary" onclick="finishTrackConflictPrompt(false)">Cancel Backup</button>
-            <button type="button" class="button-primary" id="trackConflictContinueButton" onclick="finishTrackConflictPrompt(true)" disabled>Continue Backup</button>
+            <button type="button" class="button-secondary" onclick="finishTrackConflictPrompt(false)">Cancel backup</button>
+            <button type="button" class="button-primary" id="trackConflictContinueButton" onclick="finishTrackConflictPrompt(true)" disabled>Continue backup</button>
         </div>
     </div>
 </div>

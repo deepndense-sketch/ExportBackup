@@ -8,14 +8,18 @@ test('updater reads PowerShell BOM JSON and retries incomplete results without f
     const source=fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
     let contents='\uFEFF{"ok":true,"message":"Update completed successfully."}';
     const messages=[];
+    const dialogs=[];
     const context=vm.createContext({fs:{readFileSync:()=>contents},getTempUpdaterResultPath:()=>'/result.json',
         getTempUpdaterLogPath:()=>'/update.log',fileExists:()=>true,delay:async()=>{},
-        readVersionInfo(){},checkForUpdates:async()=>{},localVersion:'5.0.2',setStatus:m=>messages.push(m)});
+        readVersionInfo(){},checkForUpdates:async()=>{},localVersion:'5.0.2',setStatus:m=>messages.push(m),showReadablePrompt:async options=>dialogs.push(options)});
     vm.runInContext(source.slice(source.indexOf('function readJsonFile('),source.indexOf('function getPositiveIntValue(')),context);
     vm.runInContext(source.slice(source.indexOf('async function monitorUpdaterCompletion('),source.indexOf('function buildUpdaterLaunchCommand(')),context);
     assert.equal(context.readJsonFile('/result.json').ok,true);
     await context.monitorUpdaterCompletion();
     assert.match(messages.pop(),/Update complete/);
+    assert.equal(dialogs[0].kind,'success');
+    assert.equal(dialogs[0].showDetails,true);
+    assert.match(dialogs[0].message,/restart Premiere Pro/);
     let attempts=0;
     context.delay=async()=>{contents=++attempts===1 ? '{"ok":' : '\uFEFF{"ok":true}';};
     await context.monitorUpdaterCompletion();
@@ -23,6 +27,7 @@ test('updater reads PowerShell BOM JSON and retries incomplete results without f
     context.delay=async()=>{};contents='\uFEFF{"ok":false,"message":"Access denied"}';
     await context.monitorUpdaterCompletion();
     assert.match(messages.pop(),/Updater failed\.\nAccess denied/);
+    assert.equal(dialogs[dialogs.length-1].kind,'error');
     contents='invalid';await context.monitorUpdaterCompletion();
     assert.match(messages.pop(),/completion could not be confirmed/);
 });

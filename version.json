@@ -1,5 +1,5 @@
 {
-  "version": "5.0.3",
+  "version": "5.0.4",
   "channel": "main",
-  "notes": "• Fixed a false 'Updater failed / Unknown error' message after a successful update.\n• The panel now waits if the updater result file is still being written.\n• Genuine update failures still show their error details.\n• Restart Premiere after updating."
+  "notes": "• Updates run with PowerShell hidden and show Updating in the panel.\n• Successful updates show a green-check dialog asking you to save your project and restart Premiere.\n• Update failures show readable error details.\n• Completion is confirmed from the updater result, with more time allowed for installation.\n• Restart Premiere after updating."
 }

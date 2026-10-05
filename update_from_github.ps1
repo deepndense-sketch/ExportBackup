@@ -85,7 +85,7 @@ catch {
     Write-Host "[ExportBackup Updater] ERROR: $message"
     Write-Host "[ExportBackup Updater] Log file: $LogPath"
     Write-Result $false $message
-    Read-Host "Update failed. Press Enter to close this window"
+    # The panel displays the result; a hidden updater must not wait for console input.
 }
 finally {
     if (Test-Path $tempRoot) {

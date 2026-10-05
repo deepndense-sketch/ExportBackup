@@ -1,6 +1,8 @@
 # Backup Project User Manual
 
-**Current release 5.0.3:** Fixed a false "Updater failed / Unknown error" message after successful updates. The result reader handles Windows PowerShell's UTF-8 encoding marker and retries incomplete result files. Genuine failures still show error details. Restart Premiere after updating; an older panel may still show the old message during this update until restarted.
+**Current release 5.0.4:** Updates run with PowerShell hidden and show progress in the panel. A confirmed successful install shows a green-check dialog asking you to save your project and restart Premiere. Failures show readable error details. The panel waits longer for the updater result and no longer treats a copied version file alone as proof of completion. Restart Premiere after updating to load this behavior.
+
+**Since 5.0.3:** Fixed a false "Updater failed / Unknown error" message after successful updates. The result reader handles Windows PowerShell's UTF-8 encoding marker and retries incomplete result files. Genuine failures still show error details. An older panel may still show the old message during its update until restarted.
 
 **Since 5.0.2:** Backup video and audio reuse lower tracks that are free within the backup range, preserving clips outside it. Empty Track previews the planned video track. Audio tracks with only disabled clips in the selected range are hidden from the list. Alerts use readable dialogs with wrapping and scrolling for long paths.
 

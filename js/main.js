@@ -431,7 +431,7 @@ function showReadablePrompt(options) {
         const successMark = document.getElementById('readablePromptSuccess');
         const detailsButton = document.getElementById('readablePromptDetails');
         const kind = options.kind || (options.success === true ? 'success' : '');
-        const compactSuccess = kind === 'success';
+        const compactSuccess = kind === 'success' && options.showDetails !== true;
         const previous = document.activeElement;
         successMark.hidden = !kind;
         successMark.className = 'success-mark ' + kind;
@@ -1207,7 +1207,7 @@ function downloadFile(url, destinationPath) {
 }
 
 async function monitorUpdaterCompletion() {
-    const maxAttempts = 10;
+    const maxAttempts = 60;
     const resultPath = getTempUpdaterResultPath();
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -1220,15 +1220,15 @@ async function monitorUpdaterCompletion() {
                 if (!parsed || typeof parsed.ok !== 'boolean') continue;
                 if (parsed.ok) {
                     readVersionInfo(true);
-                    await checkForUpdates();
-                    setStatus(`Update complete.\nInstalled version: ${localVersion}\nRestart Premiere Pro if the panel was already open.`);
+                    const message = `Installed version: ${localVersion}\n\nSave your project and restart Premiere Pro to use the new version.`;
+                    setStatus(`Update complete.\n${message}`, 'success');
+                    await showReadablePrompt({title:'Update complete', message, kind:'success', showDetails:true, confirmText:'OK'});
                     return;
                 }
 
-                setStatus(
-                    `Updater failed.\n${parsed.message || "The updater reported a failure without details."}\n` +
-                    `Log: ${(parsed && parsed.logPath) || getTempUpdaterLogPath()}`
-                );
+                const message = `Updater failed.\n${parsed.message || "The updater reported a failure without details."}\nLog: ${parsed.logPath || getTempUpdaterLogPath()}`;
+                setStatus(message, 'error');
+                await showReadablePrompt({title:'Update failed', message, kind:'error'});
                 return;
             } catch (error) {
                 setStatus(`Updater finished, but the result file could not be read.\n${error.message}`);
@@ -1236,16 +1236,12 @@ async function monitorUpdaterCompletion() {
             }
         }
 
-        readVersionInfo(true);
-        await checkForUpdates();
-
-        if (remoteVersion && compareVersions(remoteVersion, localVersion) <= 0) {
-            setStatus(`Update complete.\nInstalled version: ${localVersion}\nRestart Premiere Pro if the panel was already open.`);
-            return;
-        }
+        // A copied version.json is not proof that all extension files finished copying.
     }
 
-    setStatus(`Update completion could not be confirmed.\nThis panel sees version ${localVersion}. Restart Premiere Pro and check again.\nLog: ${getTempUpdaterLogPath()}`);
+    const message = `Update completion could not be confirmed.\nCheck the updater log before trying again.\nLog: ${getTempUpdaterLogPath()}`;
+    setStatus(message, 'warning');
+    await showReadablePrompt({title:'Update status unavailable', message, kind:'warning'});
 }
 
 function buildUpdaterLaunchCommand(scriptPath, zipPath, destination, resultPath, logPath) {
@@ -1278,7 +1274,7 @@ function runGithubUpdate() {
     const tempUpdaterLogPath = getTempUpdaterLogPath();
     const remoteZipUrl = "https://github.com/deepndense-sketch/ExportBackup/archive/refs/heads/main.zip";
 
-    setStatus("Downloading update package from GitHub...");
+    setStatus("Updating… Downloading the new version.");
 
     try {
         fs.copyFileSync(updateScriptPath, tempUpdaterScriptPath);
@@ -1298,7 +1294,7 @@ function runGithubUpdate() {
 
     downloadFile(remoteZipUrl, tempUpdaterZipPath)
         .then(() => {
-            setStatus("Launching GitHub updater. Accept the Windows permission prompt if it appears.");
+            setStatus("Updating… Accept the Windows permission prompt if it appears.");
 
             const command = buildUpdaterLaunchCommand(tempUpdaterScriptPath, tempUpdaterZipPath,
                 getUserCepExtensionPath(), tempUpdaterResultPath, tempUpdaterLogPath);
@@ -1306,19 +1302,24 @@ function runGithubUpdate() {
             childProcess.execFile(
                 "powershell.exe",
                 ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+                {windowsHide:true},
                 (error) => {
                     if (error) {
-                        setStatus(`Could not launch updater.\n${error.message}`);
+                        const message = `Could not launch updater.\n${error.message}`;
+                        setStatus(message, 'error');
+                        showReadablePrompt({title:'Update failed', message, kind:'error'});
                         return;
                     }
 
-                    setStatus(`Updater launched for the CEP extensions folder.\nTarget: ${getUserCepExtensionPath()}\nWaiting for the update result...`);
+                    setStatus("Updating… Installing the new version. Please wait.");
                     monitorUpdaterCompletion();
                 }
             );
         })
         .catch((error) => {
-            setStatus(`Could not prepare updater.\n${error.message}`);
+            const message = `Could not prepare updater.\n${error.message}`;
+            setStatus(message, 'error');
+            showReadablePrompt({title:'Update failed', message, kind:'error'});
         });
 }
 

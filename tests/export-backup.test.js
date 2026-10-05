@@ -4,6 +4,90 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+test('selection excludes disabled-only audio in range and restores it when enabled', () => {
+    const {context}=loadHostLogic();
+    const clip=(disabled,start=0,end=60)=>{
+        const c=makeTimedClip('Source.wav',end,'D:/Source.wav');
+        c.start.seconds=start;c.disabled=disabled;return c;
+    };
+    const disabled=clip(true);
+    const tracks=[makeTrack(0,[disabled,clip(1)]),makeTrack(0,[clip(true),clip(false)]),
+        makeTrack(0,[clip(true),clip(false,120,180)]),makeTrack(1,[clip(false)]),makeTrack(0,[clip(undefined)])];
+    const sequence=makeTimedSequence(tracks,[],'Show');
+    context.app.project.activeSequence=sequence;
+    const listed=()=>{
+        const result=JSON.parse(context.exportBackup.getExportSelectionInfo());
+        assert.equal(result.ok,true,result.message);
+        return result.items.filter(item=>item.kind==='audio').map(item=>item.trackNumber);
+    };
+    assert.deepEqual(listed(),[2,4,5],'mixed enabled clips, muted tracks and unknown state stay eligible');
+    disabled.disabled=false;
+    assert.deepEqual(listed(),[1,2,4,5]);
+    disabled.disabled=true;
+    assert.deepEqual(listed(),[2,4,5]);
+    assert.equal(context.ebTrackOccupiedInRange(tracks[0],{startSeconds:0,endSeconds:60}),true,
+        'disabled clips still occupy their timeline space and cannot be overwritten');
+});
+
+test('empty-track preview reports the range-free track or proposed new track without creating it', () => {
+    const {context}=loadHostLogic();
+    const sequence=makeTimedSequence([],[makeTrack(0,[makeTimedClip('Source.mp4',60)]),makeTrack(0)],'Show');
+    context.app.project.activeSequence=sequence;
+    context.ebCreateTopVideoTrack=()=>assert.fail('preview must not create tracks');
+    assert.deepEqual(JSON.parse(context.exportBackup.getEmptyTrackPreview()).trackNumber,2);
+    sequence.videoTracks[1]=makeTrack(0,[makeTimedClip('Other.mp4',60)]);
+    const result=JSON.parse(context.exportBackup.getEmptyTrackPreview());
+    assert.equal(result.trackNumber,3);assert.equal(result.createTrack,true);
+    sequence.getInPoint=()=>60;sequence.getOutPoint=()=>90;
+    assert.equal(JSON.parse(context.exportBackup.getEmptyTrackPreview()).trackNumber,1);
+});
+
+test('backup imports into lower video/audio tracks that are empty only within its saved range', () => {
+    const {context}=loadHostLogic();
+    const clip=(name,start,end)=>{const c=makeTimedClip(name,end,'D:/'+name); c.start.seconds=start; return c;};
+    const earlierVideo=clip('Show_BACKUP.mp4',0,60);
+    const earlierAudio=clip('Show_Track1.wav',0,120);
+    const laterAudio=clip('Later.wav',180,240);
+    const audio=[makeTrack(0,[clip('Source.wav',120,180)]),makeTrack(0,[clip('Old.mp4',0,120),laterAudio]),makeTrack(0,[earlierAudio])];
+    const video=[makeTrack(0,[clip('Source.mp4',120,180)]),makeTrack(0,[earlierVideo]),makeTrack(0)];
+    const sequence=makeTimedSequence(audio,video,'Show');
+    sequence.getInPoint=()=>120;sequence.getOutPoint=()=>180;
+    context.app.project.activeSequence=sequence;
+    assert.equal(context.ebResolveBackupVideoTrackNumber(sequence,1,true,false),2);
+    assert.doesNotThrow(()=>context.ebValidateBackupTrack(sequence,2,false,'Show'));
+    assert.throws(()=>context.ebValidateBackupTrack(sequence,1,false,'Show'),/not empty/);
+    const writes=[];
+    sequence.overwriteClip=(item,time,v,a)=>writes.push(['video',v,a,time]);
+    audio.forEach((track,index)=>track.overwriteClip=(item,time)=>writes.push(['audio',index,time.seconds]));
+    [earlierVideo,earlierAudio,laterAudio].forEach(c=>c.remove=()=>assert.fail('must preserve clips outside import range'));
+    context.ebGetImportBin=()=>({name:'BACKUP'});
+    context.ebImportProjectItem=mediaPath=>({name:mediaPath});
+    context.ebRemoveUnusedMedia=()=>false;
+    // Moving marks after export must not change import placement or occupancy checks.
+    sequence.getInPoint=()=>500;sequence.getOutPoint=()=>540;
+    const range={startSeconds:120,endSeconds:180};
+    const result=JSON.parse(context.exportBackup.alignMappedFiles('D:/Show_BACKUP.mp4',JSON.stringify([{path:'D:/Show_Track1.wav',trackNumber:1,exportRange:range}]),2,false,'null','{}',JSON.stringify(range)));
+    assert.equal(result.ok,true,result.message);
+    assert.deepEqual(writes,[['video',1,1,120],['audio',2,120]]);
+    assert.equal(audio[1].clips.numItems,2);
+    assert.equal(audio[2].clips[0],earlierAudio);
+});
+
+test('recorded alignment refuses overlapping source media before removing existing backups', () => {
+    const {context}=loadHostLogic();
+    const old=makeTimedClip('Show_BACKUP.mp4',180,'D:/Show_BACKUP.mp4');old.start.seconds=120;
+    old.remove=()=>assert.fail('preflight must finish before removing backups');
+    const source=makeTimedClip('Source.wav',150,'D:/Source.wav');source.start.seconds=130;
+    const sequence=makeTimedSequence([makeTrack(0,[source])],[makeTrack(0,[old])],'Show');
+    context.app.project.activeSequence=sequence;
+    context.ebGetImportBin=()=>({name:'BACKUP'});
+    const range={startSeconds:120,endSeconds:180,targetTrackNumber:1};
+    const result=JSON.parse(context.exportBackup.alignMappedFiles('D:/Show_BACKUP.mp4','[]',1,false,JSON.stringify({video:range,backupAudio:range,audioOutputs:[]}),'{}',JSON.stringify(range)));
+    assert.equal(result.ok,false);
+    assert.match(result.message,/A1 has clips inside the backup range/);
+    assert.equal(context.ebTrackOccupiedInRange(makeTrack(0,[{projectItem:{name:'Unknown.wav'}}]),range),true);
+});
+
 test('selection lists only source clips in the marked section of mixed backup and teaser tracks', () => {
     const oldName = '3292 WOW P2';
     const sources = [1,2,3,4].map(n => makeTrack(0,[makeTimedClip('Source'+n+'.wav',1208,'D:/Source'+n+'.wav')]));
@@ -814,23 +898,23 @@ test('alignment cleanup removes only a standalone replacement path, preserving o
     assert.equal(tracks[1].clips.numItems, 0);
 });
 
-test('candidate prompt names the actual media and honors both continue and cancel', () => {
+test('candidate prompt names the actual media and honors both continue and cancel', async () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'main.js'), 'utf8');
-    const start = source.indexOf('function confirmBackupCandidates(');
+    const start = source.indexOf('async function confirmBackupCandidates(');
     const end = source.indexOf('function formatExistingMediaMessage(', start);
     let message = '';
     let answer = false;
-    const context = vm.createContext({ confirm(value) { message = value; return answer; } });
+    const context = vm.createContext({ showReadablePrompt(options) { message = options.message; return Promise.resolve(answer); } });
     vm.runInContext(source.slice(start, end), context);
     const validation = { backupCandidates: [{ name: 'Old Show_BACKUP.mp4', path: 'D:/LocalTests/Old Show_BACKUP.mp4',
         timelineTrack: 'V2', durationSeconds: 60, exactName: false }] };
-    assert.equal(context.confirmBackupCandidates(validation), false);
+    assert.equal(await context.confirmBackupCandidates(validation), false);
     assert.match(message, /Old Show_BACKUP\.mp4/);
     assert.match(message, /Continue with a new Backup/);
     assert.doesNotMatch(message, /Media already exists/);
     answer = true;
-    assert.equal(context.confirmBackupCandidates(validation), true);
-    assert.equal(context.confirmBackupCandidates({}), true);
+    assert.equal(await context.confirmBackupCandidates(validation), true);
+    assert.equal(await context.confirmBackupCandidates({}), true);
 });
 
 test('Queue Backup Exports has a visual-only toggle and always starts shown', () => {
@@ -1482,7 +1566,10 @@ for (const backupTrack of [1, 3, 7]) test(`rebackup keeps V${backupTrack} visibl
     assert.equal(result.rebackupLayout.video.targetTrackNumber,backupTrack);
     assert.equal(result.rebackupLayout.backupAudio.targetTrackNumber,2);
     assert.deepEqual(videoTracks.map(t => t.muteValue),[0,0,0,0,0,0,0,0,0]);
+    assert.doesNotThrow(() => context.ebValidateBackupTrack(sequence,backupTrack,false,sequence.name));
+    markedIn=120;markedOut=160;
     assert.throws(() => context.ebValidateBackupTrack(sequence,backupTrack,false,sequence.name),/not empty/);
+    markedIn=500;markedOut=540;
     context.ebExportSequenceDirect = () => {throw new Error('render failed');};
     const failure = JSON.parse(context.exportBackup.runBackupQueue('D:/Backups','video.epr','mp3.epr','wav.epr','wav',backupTrack,false,selection,'premiere',true,false));
     assert.equal(failure.ok,false);
@@ -2422,14 +2509,18 @@ test('best-effort old-file cleanup reports EBUSY as pending instead of throwing'
     assert.deepEqual(Array.from(deletedResult.deleted), [targetPath]);
     assert.deepEqual(Array.from(deletedResult.pending), []);
 });
-test('Align Existing removes sequence-managed backup clips before target-track emptiness check', () => {
-    const hostSource = fs.readFileSync(path.join(__dirname, '..', 'jsx', 'export.jsx'), 'utf8');
-
-    assert.match(hostSource, /mediaPath === ebNormalizeMediaPathForComparison\(replacementPaths\[p\]\)/);
-    assert.match(
-        hostSource,
-        /ebRemoveManagedClipsFromTrack\(sequence\.videoTracks\[resolvedBackupTrack - 1\], sequenceBaseName, "backup", 0, \[videoPath\]\);[\s\S]*if \(videoPath && ebTrackHasClips\(sequence\.videoTracks\[resolvedBackupTrack - 1\]\)\)/
-    );
+test('range replacement removes only the matching backup inside the import range', () => {
+    const {context}=loadHostLogic();
+    const path='D:/Show_BACKUP.mp4';
+    const before=makeTimedClip('Show_BACKUP.mp4',60,path);
+    const current=makeTimedClip('Show_BACKUP.mp4',180,path); current.start.seconds=120;
+    const other=makeTimedClip('Other.wav',180,'D:/Other.wav'); other.start.seconds=120;
+    const removed=[];
+    [before,current,other].forEach((clip,i)=>clip.remove=()=>removed.push(i));
+    const track=makeTrack(0,[before,current,other]);
+    context.ebRemoveBackupClipsInRange(track,'Show','backup',0,[path],{startSeconds:120,endSeconds:180});
+    assert.deepEqual(removed,[1]);
+    assert.equal(context.ebTrackOccupiedInRange(track,{startSeconds:120,endSeconds:180},[path]),true,'unrelated overlapping source must block replacement');
 });
 
 test('automatic backup track selection picks the lowest empty video track', () => {

@@ -1,5 +1,5 @@
 {
-  "version": "5.0.1",
+  "version": "5.0.2",
   "channel": "main",
-  "notes": "• The audio selection list now follows the marked In/Out range.\n• Backup clips on tracks shared with teaser music no longer appear as source audio when backing up the main section.\n• Teaser music remains selectable when the teaser is marked.\n• Reopen the panel or restart Premiere after updating."
+  "notes": "• Backup video and audio reuse lower tracks that are free within the backup range; clips elsewhere stay untouched.\n• Empty Track shows the planned video track before export.\n• Audio tracks with only disabled clips in the selected range are hidden from the selection list.\n• Alerts now use readable dialogs with wrapping and scrolling for long file paths.\n• Restart Premiere after updating."
 }

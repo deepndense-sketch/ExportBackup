@@ -1,6 +1,8 @@
 # Backup Project User Manual
 
-**Current release 5.0.1:** The audio selection list follows the marked In/Out range. Tracks shared by an existing main-section backup and teaser music only appear when source audio overlaps the selected section. Reopen the panel or restart Premiere after updating.
+**Current release 5.0.2:** Backup video and audio reuse lower tracks that are free within the backup range, preserving clips outside it. Empty Track previews the planned video track. Audio tracks with only disabled clips in the selected range are hidden from the list. Alerts use readable dialogs with wrapping and scrolling for long paths. Restart Premiere after updating.
+
+**Since 5.0.1:** The audio selection list follows the marked In/Out range. Tracks shared by an existing main-section backup and teaser music only appear when source audio overlaps the selected section.
 
 **Since 5.0.0:** Includes the range-aware Backup/Re-backup fixes, checked-track-only re-exports, verified file renaming and relinking, readable status dialogs, and Premiere Pro as the default exporter. Update dialogs show **What's new** automatically from the upcoming release's `version.json.notes`, with scrollable text and an empty-notes fallback. This notes display becomes available after installing v5; older installed versions keep their existing update dialog until then.
 

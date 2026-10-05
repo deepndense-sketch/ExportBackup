@@ -872,9 +872,10 @@ body[data-active-tool="export"] { background: #1c1c1d; }
                         <input id="exportVideoTrackInput" type="number" min="1" value="5">
                         <button id="incrementBackupTrackButton" class="track-step-button" type="button" title="Higher import track">+</button>
                     </div>
-                    <label class="option compact-option" title="Use the lowest empty video track, creating one if needed.">
+                    <label class="option compact-option" title="Use the lowest video track free within the backup range, creating one if needed.">
                         <input type="checkbox" id="autoEmptyBackupTrackCheckbox"><span>EMPTY TRACK</span>
                     </label>
+                    <span id="autoEmptyTrackPreview" class="small-note" role="status" aria-live="polite" hidden></span>
                 </div>
             </div>
             <div id="exportSelectionList" class="selection-list"><div class="small-note">Refresh to load tracks.</div></div>

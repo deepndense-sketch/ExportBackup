@@ -622,7 +622,7 @@ function showAlignmentRecoveryError(details) {
     showReadablePrompt({title:'Import not completed', message:lines.slice(1).join('\n'), kind:'error'});
 }
 
-function confirmBackupCandidates(validation) {
+async function confirmBackupCandidates(validation) {
     const candidates = Array.isArray(validation.backupCandidates) ? validation.backupCandidates : [];
     const references = Array.isArray(validation.projectReferences) ? validation.projectReferences : [];
     if (!candidates.length && !references.length) {
@@ -639,7 +639,7 @@ function confirmBackupCandidates(validation) {
         lines.push("", `Premiere references this output path, but no file was found there:\n${reference.path}`);
     });
     lines.push("", "Continue with a new Backup? Existing candidate clips will be kept. Cancel to review them or use Re-backup.");
-    return confirm(lines.join("\n"));
+    return showReadablePrompt({title:'Possible existing backups', message:lines.join('\n'), kind:'warning', confirmText:'Continue Backup', cancelText:'Cancel'});
 }
 
 function formatExistingMediaMessage(validation) {
@@ -849,6 +849,38 @@ function resetAutoEmptyBackupTrackOption() {
     setAutoEmptyBackupTrackEnabled(false);
 }
 
+let autoEmptyTrackPreviewRequest = 0;
+let autoEmptyTrackPreviewPending = false;
+
+async function refreshAutoEmptyTrackPreview() {
+    const preview = document.getElementById('autoEmptyTrackPreview');
+    if (!preview) return;
+    if (!useAutoEmptyBackupTrack()) {
+        autoEmptyTrackPreviewRequest += 1;
+        preview.hidden = true;
+        preview.textContent = '';
+        return;
+    }
+    preview.hidden = false;
+    if (busy || autoEmptyTrackPreviewPending) return;
+    const request = ++autoEmptyTrackPreviewRequest;
+    autoEmptyTrackPreviewPending = true;
+    if (!preview.textContent) preview.textContent = 'Checking…';
+    try {
+        if (!await ensureHostLoaded()) throw new Error('Host unavailable');
+        const result = JSON.parse(await callHost('exportBackup.getEmptyTrackPreview()'));
+        if (request !== autoEmptyTrackPreviewRequest || !useAutoEmptyBackupTrack()) return;
+        preview.textContent = result && result.ok
+            ? `→ V${result.trackNumber}${result.createTrack ? ' (new track)' : ''}`
+            : ((result && result.message) || 'Refresh to check track');
+        preview.title = 'For the marked range. Checked again before exporting. Re-backup keeps its recorded track.';
+    } catch (error) {
+        if (request === autoEmptyTrackPreviewRequest) preview.textContent = 'Refresh to check track';
+    } finally {
+        autoEmptyTrackPreviewPending = false;
+    }
+}
+
 function bindAutoEmptyBackupTrackOption() {
     const checkbox = getAutoEmptyBackupTrackCheckbox();
     if (!checkbox) {
@@ -857,7 +889,11 @@ function bindAutoEmptyBackupTrackOption() {
 
     checkbox.addEventListener("change", () => {
         setAutoEmptyBackupTrackEnabled(checkbox.checked);
+        refreshAutoEmptyTrackPreview();
     });
+    setInterval(() => {
+        if (checkbox.checked && !document.hidden && !busy) refreshAutoEmptyTrackPreview();
+    }, 3000);
 }
 
 function bindBackupTrackStepper() {
@@ -1562,7 +1598,7 @@ function addBackupCategory() {
     const input = document.getElementById("categoryNameInput");
     const category = normalizeBackupCategoryName(input ? input.value : "");
     if (!category || !/^[A-Z0-9]+(?: [A-Z0-9]+)*$/.test(category)) {
-        alert("Enter a category using letters, numbers, and spaces only.");
+        showBlockingMessage("Enter a category using letters, numbers, and spaces only.");
         return;
     }
     if (configuredBackupCategories.indexOf(category) >= 0) {
@@ -1585,11 +1621,11 @@ function deleteSelectedBackupCategory() {
     const select = document.getElementById("categoryList");
     const category = select ? normalizeBackupCategoryName(select.value) : "";
     if (!category) {
-        alert("Select a category to delete.");
+        showBlockingMessage("Select a category to delete.");
         return;
     }
     if (configuredBackupCategories.length <= 1) {
-        alert("At least one backup category must remain.");
+        showBlockingMessage("At least one backup category must remain.");
         return;
     }
     configuredBackupCategories = configuredBackupCategories.filter((candidate) => candidate !== category);
@@ -2003,6 +2039,7 @@ async function refreshExportSelection() {
     renderExportSelectionList({ ok: true, items: [], message: "Reading active sequence tracks..." });
     const selectionInfo = await getExportSelectionInfo();
     renderExportSelectionList(selectionInfo);
+    await refreshAutoEmptyTrackPreview();
 }
 
 function getExportSelectionTrackSignature(selectionInfo) {
@@ -3734,7 +3771,7 @@ async function runAlignmentFlow(folderPath, options) {
         if (cleanupRetryContext) {
             return reportAlignmentFailure("No export folder is available for automatic Align Existing retry.");
         }
-        alert("Choose an export folder first.");
+        showBlockingMessage("Choose an export folder first.");
         return false;
     }
 
@@ -4140,7 +4177,12 @@ async function resolveExportActionDestination(isRebackup) {
     const entries = [layout.video, layout.backupAudio].concat(layout.audioOutputs || []).filter(Boolean);
     const paths = Array.from(new Set(entries.map((entry) => entry.mediaPath || entry.currentMediaPath).filter(Boolean)));
     if (paths.length) {
-        if (!isRebackup) throw new Error("Backup files already exist in the sequence or project. Use Re-backup to replace them.\n\n" + paths.join("\n"));
+        if (!isRebackup) {
+            const error = new Error("Backup files already exist in the sequence or project.\n\nUse Re-backup to replace them.\n\nExisting files:\n" + paths.join("\n\n"));
+            error.promptTitle = 'Backup files already exist';
+            error.promptKind = 'warning';
+            throw error;
+        }
         const folderPath = path.dirname(paths[0]);
         if (!fs.existsSync(folderPath)) throw new Error("The existing backup folder is unavailable:\n" + folderPath);
         return {folderPath, existingBackup: existing};
@@ -4159,7 +4201,7 @@ async function runExport(isRebackup) {
     try {
         await syncExportSelectionWithActiveTimeline();
     } catch (error) {
-        alert(error.message);
+        await showBlockingMessage(error.message);
         setStatus(error.message, "error");
         return;
     }
@@ -4168,7 +4210,7 @@ async function runExport(isRebackup) {
     try {
         destination = await resolveExportActionDestination(isRebackup);
     } catch (error) {
-        alert(error.message);
+        await showReadablePrompt({title:error.promptTitle || 'Could not start backup', message:error.message, kind:error.promptKind || 'error'});
         setStatus(error.message, "error");
         return;
     }
@@ -4192,12 +4234,12 @@ async function runExport(isRebackup) {
     const selectedExportMode = getSelectedExportMode();
 
     if (!fileExists(videoPresetPath)) {
-        alert("The selected video preset file was not found. Choose the video preset again.");
+        await showBlockingMessage("The selected video preset file was not found. Choose the video preset again.");
         return;
     }
 
     if (!fileExists(selectedAudioPresetPath)) {
-        alert(`The selected ${selectedAudioFormat.toUpperCase()} preset file was not found.`);
+        await showBlockingMessage(`The selected ${selectedAudioFormat.toUpperCase()} preset file was not found.`);
         return;
     }
 
@@ -4248,7 +4290,7 @@ async function runExport(isRebackup) {
         return;
     }
 
-    if (!isRebackup && !confirmBackupCandidates(validation)) {
+    if (!isRebackup && !await confirmBackupCandidates(validation)) {
         setStatus("Backup cancelled. Review the listed clips before choosing Backup or Re-backup.");
         setBusyState(false);
         return;
@@ -4372,7 +4414,7 @@ async function alignExistingFolder() {
         updateAlignFolder(exportFolder);
         document.getElementById("exportPath").textContent = exportFolder;
     } catch (error) {
-        alert(error.message);
+        await showBlockingMessage(error.message);
         setStatus(error.message, "error");
         return;
     }

@@ -146,6 +146,7 @@ function loadCollectorLogic(testDocument, options) {
         },
         localStorage: settings.localStorage || createMemoryStorage(),
         window: {
+            parent: settings.parent,
             addEventListener() {},
             confirm: settings.confirm || (() => true),
             prompt: settings.prompt || (() => null)
@@ -1915,9 +1916,9 @@ test('saving duplicate track settings selects the existing preset and does not p
     let alertMessage = '';
     let promptCount = 0;
     const context = loadCollectorLogic(createTestDocument(), {
-        alert(message) {
-            alertMessage = message;
-        },
+        parent: {showReadablePrompt(options) {
+            alertMessage = options.message;
+        }},
         prompt() {
             promptCount += 1;
             return 'Should Not Save';

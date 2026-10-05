@@ -53,7 +53,7 @@ function addCollectorCategory() {
     const input = document.getElementById('collectorCategoryName');
     const name = normalizeBackupCategoryName(input.value);
     if (!/^[A-Z0-9]+(?: [A-Z0-9]+)*$/.test(name)) {
-        alert('Enter a category using letters, numbers, and spaces only.');
+        showCollectorMessage('Enter a category using letters, numbers, and spaces only.');
         return;
     }
     if (configuredBackupCategories.indexOf(name) < 0) configuredBackupCategories.push(name);
@@ -65,7 +65,7 @@ function addCollectorCategory() {
 function deleteCollectorCategory() {
     if (isCopying) return;
     const name = document.getElementById('collectorCategoryList').value;
-    if (configuredBackupCategories.length <= 1) { alert('Keep at least one category.'); return; }
+    if (configuredBackupCategories.length <= 1) { showCollectorMessage('Keep at least one category.'); return; }
     configuredBackupCategories = configuredBackupCategories.filter(category => category !== name);
     saveCollectorCategories();
 }
@@ -1674,7 +1674,7 @@ function saveTrackPresetForSequence(sequenceKey) {
         saveSequenceFilters();
         renderSequenceFilters();
         updateSelectionSummary();
-        alert(`This track setting already exists as "${duplicatePreset.name}".`);
+        showCollectorMessage(`This track setting already exists as "${duplicatePreset.name}".`);
         return;
     }
 
@@ -2211,7 +2211,7 @@ async function readCurrentActiveSequenceFilter(locked) {
     const data = safeJsonParse(raw);
 
     if (!data || data.error || !data.sequenceName) {
-        alert(data && data.error ? data.error : 'No active sequence is available in Premiere.');
+        showCollectorMessage(data && data.error ? data.error : 'No active sequence is available in Premiere.');
         return null;
     }
 
@@ -2955,6 +2955,13 @@ function hideCompletionPrompt() {
         prompt.classList.remove('is-success');
         prompt.classList.remove('is-error');
     }
+}
+
+function showCollectorMessage(message) {
+    if (window.parent && window.parent !== window && typeof window.parent.showReadablePrompt === 'function') {
+        return window.parent.showReadablePrompt({title:'Project Collector', message, kind:'warning'});
+    }
+    showCompletionPrompt(false, message);
 }
 
 function showCompletionPrompt(success, message) {
@@ -3865,7 +3872,7 @@ async function buildCopyReadyContext() {
     const ignoredTracksSelected = hasIgnoredTracks(filtersPayload);
 
     if (sequenceOnlyMode && !filtersPayload.length) {
-        alert('Add at least one sequence before using selected-sequence collection mode.');
+        showCollectorMessage('Add at least one sequence before using selected-sequence collection mode.');
         return { ok: false };
     }
 
@@ -3939,7 +3946,7 @@ async function runCollection() {
     }
 
     if (!destination && !categoryDestination && !projectRootDestination) {
-        alert('Select destination first');
+        showCollectorMessage('Select destination first');
         return;
     }
 

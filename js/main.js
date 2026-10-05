@@ -259,7 +259,6 @@ function setBusyState(nextBusy) {
     setDisabled("incrementBackupTrackButton", nextBusy);
     setDisabled("mergeAudioButton", nextBusy);
     setDisabled("clearAudioMergesButton", nextBusy);
-    setDisabled("updateButton", nextBusy);
     setDisabled("categoryNameInput", nextBusy);
     setDisabled("addCategoryButton", nextBusy);
     setDisabled("deleteCategoryButton", nextBusy);
@@ -310,17 +309,9 @@ function setBusyState(nextBusy) {
 }
 
 function setUpdateButton(label, isUpdateAvailable, hoverText) {
-    const button = document.getElementById("updateButton");
-    button.textContent = label;
-    button.disabled = busy || !isUpdateAvailable;
-    button.title = hoverText || "";
-    if (isUpdateAvailable) {
-        button.classList.add("update-ready");
-        button.classList.remove("secondary");
-    } else {
-        button.classList.remove("update-ready");
-        button.classList.add("secondary");
-    }
+    const versionText = document.getElementById("installedVersionText");
+    versionText.textContent = `Version ${localVersion}`;
+    versionText.title = localVersionNotes || "";
     const notice = document.getElementById('updateNotice');
     if (notice) {
         notice.hidden = !isUpdateAvailable;
@@ -346,6 +337,9 @@ function showUpdatePrompt(automatic) {
     promptedUpdateVersion = remoteVersion;
     updatePromptPreviousFocus = document.activeElement;
     document.getElementById('updatePromptTitle').textContent = `Backup Project ${remoteVersion} is available`;
+    const notes = document.getElementById('updatePromptNotes');
+    notes.textContent = String(remoteVersionNotes || '').trim() || 'No release notes were provided for this version.';
+    notes.scrollTop = 0;
     prompt.classList.remove('is-hidden');
     document.getElementById('updateLaterButton').focus();
 }
@@ -367,7 +361,9 @@ function handleUpdatePromptKey(event) {
         event.preventDefault();
         const later = document.getElementById('updateLaterButton');
         const install = document.getElementById('updateInstallButton');
-        (document.activeElement === later ? install : later).focus();
+        const focusable = [document.getElementById('updatePromptNotes'), later, install].filter(Boolean);
+        const index = focusable.indexOf(document.activeElement);
+        focusable[(index + (event.shiftKey ? focusable.length - 1 : 1)) % focusable.length].focus();
     }
 }
 
@@ -425,13 +421,75 @@ function isLockedFileRecoveryMessage(message) {
         String(message || "").indexOf("Align Existing") >= 0;
 }
 
-function showBlockingMessage(message) {
-    alert(message);
+let readablePromptQueue = Promise.resolve();
+function showReadablePrompt(options) {
+    const pending = readablePromptQueue.then(() => new Promise(resolve => {
+        const dialog = document.getElementById('readablePrompt');
+        const body = document.getElementById('readablePromptMessage');
+        const yes = document.getElementById('readablePromptOK');
+        const no = document.getElementById('readablePromptCancel');
+        const successMark = document.getElementById('readablePromptSuccess');
+        const detailsButton = document.getElementById('readablePromptDetails');
+        const kind = options.kind || (options.success === true ? 'success' : '');
+        const compactSuccess = kind === 'success';
+        const previous = document.activeElement;
+        successMark.hidden = !kind;
+        successMark.className = 'success-mark ' + kind;
+        successMark.textContent = kind === 'success' ? '✓' : (kind === 'error' ? '×' : '!');
+        detailsButton.hidden = !compactSuccess;
+        body.hidden = compactSuccess;
+        detailsButton.textContent = 'Show details';
+        detailsButton.setAttribute('aria-expanded', 'false');
+        detailsButton.onclick = () => {
+            body.hidden = !body.hidden;
+            detailsButton.textContent = body.hidden ? 'Show details' : 'Hide details';
+            detailsButton.setAttribute('aria-expanded', String(!body.hidden));
+        };
+        document.getElementById('readablePromptTitle').textContent = options.title || 'Backup Project';
+        body.textContent = String(options.message || '');
+        yes.textContent = options.confirmText || 'OK';
+        no.hidden = !options.cancelText;
+        no.textContent = options.cancelText || 'Cancel';
+        const close = accepted => {
+            dialog.classList.add('is-hidden');
+            dialog.removeEventListener('keydown', keydown);
+            yes.onclick = no.onclick = detailsButton.onclick = null;
+            if (previous && previous.focus) previous.focus();
+            resolve(accepted);
+        };
+        const keydown = event => {
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(!options.cancelText); }
+            if (event.key === 'Tab') {
+                const focusable = [detailsButton, body, no, yes].filter(element => !element.hidden);
+                const index = focusable.indexOf(document.activeElement);
+                event.preventDefault();
+                focusable[(index + (event.shiftKey ? focusable.length - 1 : 1)) % focusable.length].focus();
+            }
+        };
+        yes.onclick = () => close(true);
+        no.onclick = () => close(false);
+        dialog.addEventListener('keydown', keydown);
+        dialog.classList.remove('is-hidden');
+        body.scrollTop = 0;
+        (options.cancelText ? no : yes).focus();
+    }));
+    readablePromptQueue = pending.catch(() => {});
+    return pending;
+}
+
+function showBlockingMessage(message, kind) {
+    return showReadablePrompt({message, kind:kind || 'error', title:kind === 'success' ? 'Completed successfully' : 'Could not complete'});
 }
 
 const ALIGNMENT_RECOVERY_TEXT = "Please use Align Existing to import the file.";
 
-function showResultPrompt(title, message) {
+function showResultPrompt(title, message, options) {
+    if (options && options.success === true) {
+        return showReadablePrompt({title: String(title || 'Completed successfully'), message, success:true});
+    }
+    if (options) {
+        return showReadablePrompt({title: 'Completed with warnings', message, kind:'warning'});
+    }
     const lines = [String(title || "Done")];
     if (message) {
         lines.push(String(message));
@@ -449,7 +507,7 @@ function showCleanupRetryPrompt(title, message, kind) {
         return;
     }
 
-    titleElement.textContent = String(title || "Cleanup in progress");
+    titleElement.textContent = (kind === 'success' ? '✓ ' : kind === 'error' ? '× ' : '! ') + String(title || "Cleanup in progress");
     messageElement.textContent = String(message || "");
     panel.classList.toggle("is-success", kind === "success");
     panel.classList.toggle("is-error", kind === "error");
@@ -561,7 +619,7 @@ function showAlignmentRecoveryError(details) {
         lines.push("", details);
     }
     setStatus(lines.join("\n"), "error");
-    showResultPrompt("IMPORT NOT COMPLETED", ALIGNMENT_RECOVERY_TEXT);
+    showReadablePrompt({title:'Import not completed', message:lines.slice(1).join('\n'), kind:'error'});
 }
 
 function confirmBackupCandidates(validation) {
@@ -654,14 +712,14 @@ function getSelectedAudioFormat() {
 }
 
 function normalizeExportMode(mode) {
-    return String(mode || "").toLowerCase() === EXPORT_MODE_PREMIERE.toLowerCase()
-        ? EXPORT_MODE_PREMIERE
-        : EXPORT_MODE_MEDIA_ENCODER;
+    return String(mode || "").toLowerCase() === EXPORT_MODE_MEDIA_ENCODER.toLowerCase()
+        ? EXPORT_MODE_MEDIA_ENCODER
+        : EXPORT_MODE_PREMIERE;
 }
 
 function getSelectedExportMode() {
     const inputs = getExportModeInputs();
-    return inputs.premiere && inputs.premiere.checked ? EXPORT_MODE_PREMIERE : EXPORT_MODE_MEDIA_ENCODER;
+    return inputs.mediaEncoder && inputs.mediaEncoder.checked ? EXPORT_MODE_MEDIA_ENCODER : EXPORT_MODE_PREMIERE;
 }
 
 function setSelectedExportMode(mode) {
@@ -1353,12 +1411,8 @@ function loadSavedBackupSettings() {
         setSelectedAudioFormat("mp3");
     }
 
-    try {
-        const savedExportMode = localStorage.getItem(EXPORT_MODE_STORAGE_KEY);
-        setSelectedExportMode(savedExportMode || EXPORT_MODE_MEDIA_ENCODER);
-    } catch (error) {
-        setSelectedExportMode(EXPORT_MODE_MEDIA_ENCODER);
-    }
+    // Always start in Premiere, even if Media Encoder was used last session.
+    setSelectedExportMode(EXPORT_MODE_PREMIERE);
 
     if (removeMarkersCheckbox) {
         try {
@@ -1781,7 +1835,7 @@ async function getExportSelectionInfo() {
         return { ok: false, message: "Could not load Premiere host script." };
     }
 
-    const result = await callHost("exportBackup.getExportSelectionInfo()");
+    const result = await callHost(`exportBackup.getExportSelectionInfo("${escapeForEvalScript(JSON.stringify(getBackupClipOwners()))}")`);
     return parseHostResult(result) || { ok: false, message: result || "Could not read export selection." };
 }
 
@@ -1813,7 +1867,7 @@ function renderExportSelectionList(selectionInfo) {
     container.innerHTML = items.map((item, index) => {
         const checkboxId = `exportSelectionItem_${index}`;
         const mergeCheckboxId = `mergeSelectionItem_${index}`;
-        const checked = item.kind === "video" || item.selected !== false ? "checked" : "";
+        const checked = item.selected !== false ? "checked" : "";
         const disabled = item.locked ? "disabled" : "";
         const kindLabel = item.kind === "video" ? "Backup video" : `Audio track ${item.trackNumber}`;
         const existingGroup = item.kind === "audio"
@@ -1926,11 +1980,17 @@ function getSelectedAudioTrackNumbers() {
 function getSelectedQueueItems() {
     const container = document.getElementById("exportSelectionList");
     const videoInput = container ? container.querySelector(".queue-checkbox[data-kind='video']") : null;
+    const audioInputs = container ? Array.from(container.querySelectorAll(".queue-checkbox[data-kind='audio']")) : [];
+    const checkedTracks = audioInputs.filter(input => input.checked && !input.disabled)
+        .map(input => parseInt(input.getAttribute('data-track-number'), 10)).filter(number => number > 0);
+    const selectedGroups = mergedAudioGroups.map(group => group.trackNumbers.filter(number => checkedTracks.includes(number)))
+        .filter(group => group.length > 1);
 
     return {
         includeVideo: videoInput ? !!videoInput.checked : true,
-        audioTracks: getSelectedAudioTrackNumbers(),
-        audioGroups: mergedAudioGroups.map((group) => group.trackNumbers),
+        audioTracks: checkedTracks.filter(number => !selectedGroups.some(group => group.includes(number))),
+        audioGroups: selectedGroups,
+        preserveUnselectedAudio: audioInputs.some(input => !input.checked || input.disabled),
         replaceAudioLayout: true
     };
 }
@@ -1963,7 +2023,20 @@ async function syncExportSelectionWithActiveTimeline() {
 
     const previousSignature = getExportSelectionTrackSignature(exportSelectionState);
     const latestSignature = getExportSelectionTrackSignature(latestSelection);
-    if (!exportSelectionState || previousSignature !== latestSignature) {
+    if (!exportSelectionState || previousSignature !== latestSignature || exportSelectionState.sequenceName !== latestSelection.sequenceName) {
+        if (exportSelectionState && exportSelectionState.sequenceName === latestSelection.sequenceName) {
+            const container = document.getElementById('exportSelectionList');
+            const choices = {};
+            if (container) Array.from(container.querySelectorAll('.queue-checkbox')).forEach(input => {
+                choices[input.getAttribute('data-kind') + ':' + input.getAttribute('data-track-number')] = !!input.checked;
+            });
+            latestSelection.items.forEach(item => {
+                const key = item.kind + ':' + (item.trackNumber || 0);
+                // Newly discovered tracks should not silently expand this export.
+                item.selected = choices[key] === true;
+            });
+            latestSelection.audioGroups = mergedAudioGroups.map(group => group.trackNumbers);
+        }
         renderExportSelectionList(latestSelection);
         setStatus(`Audio track layout updated from the active sequence: ${latestSignature || "no source audio tracks"}.`);
         return true;
@@ -2042,6 +2115,7 @@ function normalizeAudioEntries(entries, baseName, preferredAudioFormat) {
             path: entry.path,
             trackNumber,
             trackNumbers,
+            exportRange: entry.exportRange || null,
             name: fileName
         };
         const trackKey = trackNumbers.join("-");
@@ -2131,6 +2205,7 @@ function scanExportFolderForSequence(folderPath, sequenceName, manifest, options
                     path: entry.path,
                     trackNumber: parseInt(entry.trackNumber, 10) || 0,
                     trackNumbers: Array.isArray(entry.trackNumbers) ? entry.trackNumbers : [],
+                    exportRange: entry.exportRange || manifest.exportRange || null,
                     name: entry.name || path.basename(entry.path)
                 });
             }
@@ -3304,6 +3379,59 @@ function updateAlignFolder(folderPath) {
     } catch (error) {}
 }
 
+function getBackupClipOwners() {
+    try {
+        const owners = JSON.parse(localStorage.getItem('exportbackup.clipOwners.v1') || '{}');
+        return owners && typeof owners === 'object' && !Array.isArray(owners) ? owners : {};
+    }
+    catch (error) { return {}; }
+}
+
+function rememberBackupClipOwners(parsed) {
+    if (!parsed || !parsed.sequenceID || !parsed.projectPath || !Array.isArray(parsed.queuedFiles)) return;
+    const owners = getBackupClipOwners();
+    parsed.queuedFiles.forEach(entry => {
+        const filePath = entry.finalPath || entry.path;
+        if (filePath) owners[getPathComparisonKey(filePath)] = Object.assign({}, owners[getPathComparisonKey(filePath)] || {}, {
+            path: filePath, projectPath: parsed.projectPath, sequenceID: String(parsed.sequenceID)
+        }, entry.exportRange || parsed.exportRange ? {exportRange:entry.exportRange || parsed.exportRange} : {});
+    });
+    localStorage.setItem('exportbackup.clipOwners.v1', JSON.stringify(owners));
+}
+
+async function confirmLegacyBackupNames(paths) {
+    const result = parseHostResult(await callHost(`exportBackup.getBackupRenameCandidates("${escapeForEvalScript(JSON.stringify(paths))}","${escapeForEvalScript(JSON.stringify(getBackupClipOwners()))}")`));
+    if (!result || !result.ok) throw new Error((result && result.message) || 'Could not verify backup names.');
+    const candidates = result.candidates || [];
+    if (!candidates.length) return;
+    const message = `Do these full-length backup files belong to this sequence?\n\n${result.sequenceName}\n\n${candidates.map(entry => entry.path + '\n→ ' + entry.targetName).join('\n\n')}\n\nRename files changes their names in Explorer and relinks Premiere. Keep names continues alignment without renaming them.`;
+    if (!await showReadablePrompt({title:'Confirm backup files', message, confirmText:'Rename files', cancelText:'Keep names'})) return;
+    rememberBackupClipOwners({sequenceID:result.sequenceID,projectPath:result.projectPath,
+        queuedFiles:candidates.map(entry => ({finalPath:entry.path}))});
+}
+
+function applyBackupFileRenames(matchInfo, renamedFiles) {
+    if (!renamedFiles || !renamedFiles.length) return;
+    const owners = getBackupClipOwners();
+    const replacements = {};
+    renamedFiles.forEach(entry => {
+        const oldKey = getPathComparisonKey(entry.oldPath);
+        replacements[oldKey] = entry.newPath;
+        const ownerKey = Object.keys(owners).find(key => getPathComparisonKey(owners[key].path) === oldKey);
+        if (ownerKey) {
+            owners[getPathComparisonKey(entry.newPath)] = Object.assign({}, owners[ownerKey], {path:entry.newPath});
+            if (ownerKey !== getPathComparisonKey(entry.newPath)) delete owners[ownerKey];
+        }
+    });
+    const replacePaths = value => {
+        if (typeof value === 'string') return replacements[getPathComparisonKey(value)] || value;
+        if (value && typeof value === 'object') Object.keys(value).forEach(key => { value[key] = replacePaths(value[key]); });
+        return value;
+    };
+    replacePaths(matchInfo);
+    localStorage.setItem('exportbackup.clipOwners.v1', JSON.stringify(owners));
+}
+
 function createExportManifestFromHostResult(parsed) {
     return {
         version: 5,
@@ -3317,6 +3445,7 @@ function createExportManifestFromHostResult(parsed) {
         rebackup: parsed.rebackup === true,
         rebackupPrepared: parsed.rebackupPrepared === true,
         rebackupLayout: parsed.rebackupLayout || null,
+        exportRange: parsed.exportRange || null,
         expectedFiles: Array.isArray(parsed.queuedFiles) ? parsed.queuedFiles : [],
         obsoleteAudioFiles: Array.isArray(parsed.obsoleteAudioFiles) ? parsed.obsoleteAudioFiles : [],
         manifestPath: "",
@@ -3568,7 +3697,7 @@ async function copyExistingBackupsToResolvedLocation() {
             ? `Copied ${copiedTargets.length} existing backup file(s).`
             : `All ${alreadyAtDestination} matching backup file(s) are already at the destination.`;
         setStatus(`${resultMessage}\nDestination: ${destinationFolder}`, "success");
-        showBlockingMessage(`${resultMessage}\n\nDestination:\n${destinationFolder}`);
+        showBlockingMessage(`${resultMessage}\n\nDestination:\n${destinationFolder}`, 'success');
     } catch (error) {
         copiedTargets.forEach((targetPath) => {
             try {
@@ -3680,6 +3809,9 @@ async function runAlignmentFlow(folderPath, options) {
             return reportAlignmentFailure(message);
         }
 
+        if (settings.autoTriggered === false) {
+            await confirmLegacyBackupNames([matchInfo.videoPath].concat(matchInfo.audio.map(entry => entry.path)).filter(Boolean));
+        }
         const alignmentCleanup = await prepareAlignExistingCleanup(matchInfo);
 
         const backupVideoTrackNumber = getPositiveIntValue(
@@ -3697,7 +3829,10 @@ async function runAlignmentFlow(folderPath, options) {
                 ? (matchInfo.manifest.rebackupLayout || null)
                 : null
         );
-        const script = `exportBackup.alignMappedFiles("${escapeForEvalScript(resolvedVideoPath)}","${escapeForEvalScript(audioJson)}",${backupVideoTrackNumber},${sortProjectFiles},"${escapeForEvalScript(rebackupLayoutJson)}")`;
+        const ownersJson = JSON.stringify(getBackupClipOwners());
+        const videoEntry = matchInfo.manifest && (matchInfo.manifest.expectedFiles || []).find(entry => entry.kind === 'video');
+        const exportRangeJson = JSON.stringify(videoEntry && videoEntry.exportRange || matchInfo.manifest && matchInfo.manifest.exportRange || null);
+        const script = `exportBackup.alignMappedFiles("${escapeForEvalScript(resolvedVideoPath)}","${escapeForEvalScript(audioJson)}",${backupVideoTrackNumber},${sortProjectFiles},"${escapeForEvalScript(rebackupLayoutJson)}","${escapeForEvalScript(ownersJson)}","${escapeForEvalScript(exportRangeJson)}")`;
         const result = await callHost(script);
         const parsed = parseHostResult(result);
 
@@ -3705,6 +3840,7 @@ async function runAlignmentFlow(folderPath, options) {
             return reportAlignmentFailure((parsed && parsed.message) || "Alignment failed.");
         }
 
+        applyBackupFileRenames(matchInfo, parsed.renamedFiles);
         const cleanupSummary = await attemptPostAlignmentCleanup(
             matchInfo.manifest,
             alignmentCleanup && alignmentCleanup.stalePaths,
@@ -3785,9 +3921,8 @@ async function runAlignmentFlow(folderPath, options) {
         } else if (!cleanupRetryContext) {
             showResultPrompt(
                 successTitle,
-                settings.autoTriggered
-                    ? "Backup files were imported and aligned successfully."
-                    : "Existing backup files were imported and aligned successfully."
+                (settings.autoTriggered ? 'Backup files were imported and aligned successfully.' : 'Existing backup files were imported and aligned successfully.') + '\n\n' + lines.slice(1).join('\n\n'),
+                {success: !(parsed.renameWarnings && parsed.renameWarnings.length) && !extraCleanupError && !extraCleanup.retained.length && !copyResult.message}
             );
         }
         return true;
@@ -3999,7 +4134,7 @@ async function chooseWavPreset() {
 
 async function resolveExportActionDestination(isRebackup) {
     if (!(await ensureHostLoaded())) throw new Error("Could not load Premiere host script.");
-    const existing = parseHostResult(await callHost("exportBackup.getActiveBackupLayout()"));
+    const existing = parseHostResult(await callHost(`exportBackup.getActiveBackupLayout("${escapeForEvalScript(JSON.stringify(getBackupClipOwners()))}")`));
     if (!existing || !existing.ok) throw new Error(existing && existing.message || "Could not inspect existing backups.");
     const layout = existing.layout || {};
     const entries = [layout.video, layout.backupAudio].concat(layout.audioOutputs || []).filter(Boolean);
@@ -4172,6 +4307,8 @@ setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
 
     try {
         const manifest = createExportManifestFromHostResult(parsed);
+        try { rememberBackupClipOwners(parsed); }
+        catch (ownershipError) { setStatus('Could not save backup clip ownership: ' + ownershipError.message); }
         manifest.manifestPath = writeExportManifest(manifest);
         if (manifest.rebackup && parsed.exportMode === EXPORT_MODE_PREMIERE) {
             assertExpectedExportsAreReady(manifest);

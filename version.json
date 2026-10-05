@@ -1,5 +1,5 @@
 {
-  "version": "4.8.1",
+  "version": "5.0.0",
   "channel": "main",
-  "notes": "Release 4.8.1 moves the Solo reminder slightly upward to reduce the gap below Tracks to back up, without moving the heading or other controls. Includes the Parent Folder destination and direct CEP update popup from 4.8.0."
+  "notes": "• Backup imports at the selected In point.\n• Re-backup keeps the original range and position.\n• Only checked tracks are re-exported; unchecked audio stays unchanged.\n• Align Existing can rename verified backup files and relink Premiere.\n• Clear success, warning and error dialogs with readable filenames.\n• Premiere Pro is always the default export option.\n• Future update dialogs show what's new before you install."
 }

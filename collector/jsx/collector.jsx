@@ -1520,7 +1520,8 @@ function pcEbGetBackupTrackCandidate(sequence, track, baseName) {
     var expected = pcEbGetActiveSequenceExpectedDuration(sequence);
     var fullDuration = pcEbGetSequenceFullDurationSeconds(sequence);
     var tolerance = 0.2;
-    if (duration <= 0 || !(
+    var recordedRange = typeof pcEbGetRecordedBackupRange === 'function' ? pcEbGetRecordedBackupRange(sequence, pcEbGetManagedClipFinalMediaPath(clip)) : null;
+    if (duration <= 0 || !(recordedRange ||
         (expected > 0 && Math.abs(duration - expected) <= tolerance) ||
         (fullDuration > 0 && Math.abs(duration - fullDuration) <= tolerance)
     )) {

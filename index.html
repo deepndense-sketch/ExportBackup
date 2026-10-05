@@ -258,11 +258,7 @@ button.preset-button,
     border-color: rgba(154, 168, 184, 0.22);
 }
 
-#updateButton {
-    background: rgba(48, 56, 68, 0.58);
-    color: var(--text);
-    border-color: rgba(154, 168, 184, 0.2);
-}
+#installedVersionText { color: var(--muted); font-size: 12px; white-space: nowrap; }
 
 #chooseVideoPresetButton,
 #chooseMp3PresetButton,
@@ -323,25 +319,12 @@ input[type="radio"]:checked::after {
     transform: rotate(-45deg) scale(1);
 }
 
-#updateButton.update-ready {
-    background: linear-gradient(135deg, #3f9cff, #1268ee);
-    color: #ffffff;
-    border: 1px solid rgba(153, 205, 255, 0.72);
-    box-shadow: 0 0 0 1px rgba(38, 130, 255, 0.2), 0 6px 18px rgba(18, 104, 238, 0.34);
-}
-
-#updateButton.update-ready:hover {
-    background: linear-gradient(135deg, #59aaff, #287aff);
-}
 
 button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
 
-#updateButton:disabled {
-    cursor: default;
-}
 
 .is-hidden {
     display: none;
@@ -552,10 +535,6 @@ button:disabled {
     gap: 8px;
 }
 
-.section-heading #updateButton {
-    padding: 8px 12px;
-    font-size: 12px;
-}
 
 .queue-section-heading {
     display: flex;
@@ -638,6 +617,41 @@ button:disabled {
     display: none;
 }
 
+#readablePrompt { z-index: 1100; padding: 10px; }
+.dialog-panel.readable-dialog {
+    box-sizing: border-box;
+    width: 560px;
+    max-width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+    resize: both;
+    overflow: hidden;
+}
+.readable-dialog h2 { margin: 0; flex-shrink: 0; overflow-wrap: anywhere; }
+.readable-dialog .dialog-copy {
+    margin: 0;
+    min-height: 0;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    font-size: 14px;
+    line-height: 1.55;
+    color: #edf1f5;
+}
+.readable-dialog .dialog-actions { flex-shrink: 0; flex-wrap: wrap; }
+.readable-dialog button[hidden] { display: none; }
+.readable-dialog [hidden] { display: none !important; }
+.readable-dialog .result-heading { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.readable-dialog .success-mark { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; background: #173f2c; color: #71e69f; font-size: 28px; font-weight: bold; }
+.readable-dialog .success-mark.error { background: #4c2427; color: #ff9292; }
+.readable-dialog .success-mark.warning { background: #4a3c1d; color: #ffda70; }
+.readable-dialog .details-toggle { align-self: flex-start; flex-shrink: 0; padding: 4px 0; border: 0; background: transparent; color: #b9c7d6; font-size: 12px; text-decoration: underline; }
+
 .dialog-panel {
     width: min(440px, 100%);
     padding: 20px;
@@ -653,6 +667,9 @@ button:disabled {
 .dialog-panel.update-dialog { background: #292c31; border: 1px solid #f39b48; border-top-width: 3px; border-radius: 14px; padding: 22px; }
 .update-dialog .dialog-copy { color: #e3e5e9; line-height: 1.5; }
 .update-dialog .dialog-actions button { padding: 10px 16px; }
+.dialog-panel.update-dialog { box-sizing: border-box; max-height: calc(100vh - 36px); overflow-y: auto; }
+.update-dialog .release-notes { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; padding: 12px; background: #202328; border-radius: 6px; }
+.update-dialog h3 { margin: 0; color: #ffcf99; font-size: 14px; }
 .dialog-panel h2 {
     font-size: 18px;
     color: #dcecff;
@@ -812,7 +829,7 @@ body[data-active-tool="export"] { background: #1c1c1d; }
                 <div class="section-label">Backup</div>
                 <div class="header-actions">
                     <button id="refreshExportSelectionButton" class="secondary" onclick="refreshExportSelection()">Refresh</button>
-                    <button id="updateButton" class="secondary" onclick="showUpdatePrompt(false)">Version ...</button>
+                    <span id="installedVersionText">Version ...</span>
                 </div>
             </div>
         </div>
@@ -873,8 +890,8 @@ body[data-active-tool="export"] { background: #1c1c1d; }
                 <div class="export-format-row">
                 <div class="setting-group export">
                     <span class="setting-label">Export With</span>
-                    <label class="option"><input type="checkbox" id="exportModePremiere" value="premiere"><span>Premiere</span></label>
-                    <label class="option"><input type="checkbox" id="exportModeMediaEncoder" value="mediaEncoder" checked><span>Media Encoder</span></label>
+                    <label class="option"><input type="checkbox" id="exportModePremiere" value="premiere" checked><span>Premiere</span></label>
+                    <label class="option"><input type="checkbox" id="exportModeMediaEncoder" value="mediaEncoder"><span>Media Encoder</span></label>
                 </div>
                 <div class="setting-group audio">
                     <span class="setting-label">Audio</span>
@@ -927,6 +944,8 @@ body[data-active-tool="export"] { background: #1c1c1d; }
     <div class="dialog-panel update-dialog stack">
         <h2 id="updatePromptTitle">Backup Project update available</h2>
         <p id="updatePromptCopy" class="dialog-copy">Update Backup Project directly in Premiere's plugin folder.</p>
+        <h3 id="updatePromptNotesTitle">What's new</h3>
+        <div id="updatePromptNotes" class="dialog-copy release-notes" tabindex="0" aria-labelledby="updatePromptNotesTitle"></div>
         <p class="dialog-copy">Save your project first. Accept the Windows permission prompt if shown, then <strong>restart Premiere after the update finishes.</strong></p>
         <div class="dialog-actions">
             <button id="updateLaterButton" type="button" class="secondary" onclick="closeUpdatePrompt()">Later</button>
@@ -958,6 +977,20 @@ body[data-active-tool="export"] { background: #1c1c1d; }
         </div>
     </div>
 </div>
+</div>
+<div id="readablePrompt" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="readablePromptTitle" aria-describedby="readablePromptMessage">
+    <div class="dialog-panel readable-dialog">
+        <div class="result-heading">
+            <span id="readablePromptSuccess" class="success-mark" aria-hidden="true" hidden>&#10003;</span>
+            <h2 id="readablePromptTitle">Backup Project</h2>
+        </div>
+        <button id="readablePromptDetails" class="details-toggle" type="button" aria-controls="readablePromptMessage" aria-expanded="false" hidden>Show details</button>
+        <div id="readablePromptMessage" class="dialog-copy" tabindex="0"></div>
+        <div class="dialog-actions">
+            <button id="readablePromptCancel" class="secondary" type="button" hidden>Cancel</button>
+            <button id="readablePromptOK" type="button">OK</button>
+        </div>
+    </div>
 </div>
 <iframe id="collectorPanel" role="tabpanel" aria-labelledby="collectorTab" title="Project Collector" scrolling="no" hidden></iframe>
 </body>

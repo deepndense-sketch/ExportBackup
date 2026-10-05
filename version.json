@@ -1,5 +1,5 @@
 {
-  "version": "5.0.0",
+  "version": "5.0.1",
   "channel": "main",
-  "notes": "• Backup imports at the selected In point.\n• Re-backup keeps the original range and position.\n• Only checked tracks are re-exported; unchecked audio stays unchanged.\n• Align Existing can rename verified backup files and relink Premiere.\n• Clear success, warning and error dialogs with readable filenames.\n• Premiere Pro is always the default export option.\n• Future update dialogs show what's new before you install."
+  "notes": "• The audio selection list now follows the marked In/Out range.\n• Backup clips on tracks shared with teaser music no longer appear as source audio when backing up the main section.\n• Teaser music remains selectable when the teaser is marked.\n• Reopen the panel or restart Premiere after updating."
 }

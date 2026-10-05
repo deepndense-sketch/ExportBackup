@@ -2985,6 +2985,30 @@ exportBackup.findLegacyBackupForActiveSequence = function (folderPath, includeCu
     }
 };
 
+// Inspect clips in the marked range, not every clip on a mixed backup/teaser track.
+function ebTrackHasSourceInRange(sequence, track, baseName, layout, range) {
+    var outputs = (layout.audioOutputs || []).concat([layout.video, layout.backupAudio]);
+    for (var i = 0; i < track.clips.numItems; i++) {
+        var clip = track.clips[i];
+        if (ebValidExportRange(range) && clip.start && clip.end) {
+            var start = Number(clip.start.seconds);
+            var end = Number(clip.end.seconds);
+            if (isFinite(start) && isFinite(end) && end > start &&
+                (end <= range.startSeconds || start >= range.endSeconds)) continue;
+        }
+        var mediaPath = ebGetManagedClipFinalMediaPath(clip);
+        var managed = false;
+        for (var j = 0; j < outputs.length; j++) {
+            if (mediaPath && outputs[j] && outputs[j].mediaPath &&
+                ebNormalizeMediaPathForComparison(mediaPath) === ebNormalizeMediaPathForComparison(outputs[j].mediaPath)) managed = true;
+        }
+        var candidate = ebGetBackupTrackCandidate(sequence, {clips: {0: clip, numItems: 1}}, baseName);
+        if (candidate && candidate.exactName) managed = true;
+        if (!managed) return true;
+    }
+    return false;
+}
+
 exportBackup.getExportSelectionInfo = function (ownersJson) {
     try {
         if (ownersJson) exportBackup.backupOwners = JSON.parse(ownersJson);
@@ -3012,6 +3036,10 @@ exportBackup.getExportSelectionInfo = function (ownersJson) {
             sequenceBaseName = existingLayout.baseName;
             managedSelection = ebGetSequenceManagedSelection(sequence, sequenceBaseName);
         }
+        var selectionRange = null;
+        try {
+            selectionRange = {startSeconds: Number(sequence.getInPoint()), endSeconds: Number(sequence.getOutPoint())};
+        } catch (rangeError) {}
 
         items = [{
             kind: "video",
@@ -3023,6 +3051,9 @@ exportBackup.getExportSelectionInfo = function (ownersJson) {
 
         for (i = 0; i < ebGetTrackCount(sequence.audioTracks); i++) {
             if (!ebTrackHasClips(sequence.audioTracks[i])) {
+                continue;
+            }
+            if (!ebTrackHasSourceInRange(sequence, sequence.audioTracks[i], sequenceBaseName, existingLayout, selectionRange)) {
                 continue;
             }
 

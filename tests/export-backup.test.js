@@ -4,6 +4,29 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+test('selection lists only source clips in the marked section of mixed backup and teaser tracks', () => {
+    const oldName = '3292 WOW P2';
+    const sources = [1,2,3,4].map(n => makeTrack(0,[makeTimedClip('Source'+n+'.wav',1208,'D:/Source'+n+'.wav')]));
+    const teaser = name => { const clip=makeTimedClip(name,1329,'D:/'+name); clip.start.seconds=1281; return clip; };
+    const backup = suffix => makeTimedClip(oldName+suffix,1208,'D:/'+oldName+suffix);
+    const sequence = makeTimedSequence(sources.concat([
+        makeTrack(0,[backup('_BACKUP.mp4'),teaser('Teaser music.mp3')]),
+        makeTrack(0,[backup('_Track1.wav'),teaser('Teaser atmosphere.mp3')]),
+        makeTrack(0,[backup('_Track2.wav')]),
+        makeTrack(0,[backup('_Track3-4.wav')])
+    ]),[makeTrack(0,[backup('_BACKUP.mp4')])],oldName+' Copy 01');
+    sequence.end=String(1329*254016000000);
+    let start=0,end=1208;
+    sequence.getInPoint=()=>start; sequence.getOutPoint=()=>end;
+    const {context}=loadHostLogic(); context.app.project.activeSequence=sequence;
+    const tracks=()=>{const result=JSON.parse(context.exportBackup.getExportSelectionInfo()); assert.equal(result.ok,true,result.message); return result.items.filter(x=>x.kind==='audio').map(x=>x.trackNumber);};
+    assert.deepEqual(tracks(),[1,2,3,4],'main selection excludes backup clips on mixed tracks');
+    start=1281;end=1329;
+    assert.deepEqual(tracks(),[5,6],'teaser music remains selectable even on backup-named tracks');
+    start=1208;end=1281;
+    assert.deepEqual(tracks(),[],'gap and clips touching the boundaries do not add source tracks');
+});
+
 test('marked range is captured for new backups and original ranges survive changed teaser marks', () => {
     const {context} = loadHostLogic();
     const sequence = makeTimedSequence([],[],'Show');

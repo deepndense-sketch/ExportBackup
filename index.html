@@ -229,14 +229,6 @@ button.preset-button,
     border-color: rgba(111, 183, 255, 0.24);
 }
 
-#mergeAudioButton.selection-list-merge-button {
-    justify-self: end;
-    padding: 3px 8px;
-    border-radius: 8px;
-    font-size: 11px;
-    line-height: 1.1;
-}
-
 .selection-list-button-group {
     display: flex;
     gap: 6px;
@@ -587,7 +579,7 @@ button:disabled {
     line-height: 1.35;
 }
 
-.selection-item.is-merged {
+.selection-item.is-merged .merge-checkbox-wrap {
     opacity: 0.48;
 }
 
@@ -653,6 +645,9 @@ button:disabled {
 .readable-dialog .details-toggle { align-self: flex-start; flex-shrink: 0; padding: 4px 0; border: 0; background: transparent; color: #b9c7d6; font-size: 12px; text-decoration: underline; }
 
 .dialog-panel {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: calc(100vw - 20px);
     width: min(440px, 100%);
     padding: 20px;
     border: 1px solid rgba(97, 168, 255, 0.38);
@@ -678,7 +673,12 @@ button:disabled {
 .dialog-copy {
     color: #b9c7d6;
     font-size: 13px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
+.dialog-copy .dialog-summary { margin: 0 0 10px; font-size: 13px; line-height: 1.55; font-weight: 400; color: #edf1f5; }
+.dialog-copy .dialog-detail-list { margin: 10px 0 0; padding-left: 17px; font-size: 11px; line-height: 1.55; font-weight: 400; color: #b9c7d6; white-space: normal; }
+.dialog-detail-list li { margin: 5px 0; }
 
 .dialog-option {
     min-height: 42px;
@@ -703,6 +703,24 @@ button:disabled {
     font-size: 13px;
 }
 
+#fileRetryPrompt .dialog-panel {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+}
+#fileRetryFiles {
+    margin: 0;
+    padding-left: 18px;
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #b8c5d2;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+#fileRetryFiles li { margin: 6px 0; }
 .cleanup-dialog-panel {
     border-color: rgba(255, 165, 74, 0.52);
 }
@@ -714,8 +732,8 @@ button:disabled {
 .cleanup-dialog-panel .dialog-copy {
     white-space: pre-wrap;
     color: #e4eaf1;
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 400;
     line-height: 1.55;
 }
 
@@ -811,6 +829,38 @@ body[data-active-tool="export"] { background: #1c1c1d; }
 #exportPanel .backup-action-row { align-items: flex-start; }
 #exportPanel #exportButton { min-width: 130px; }
 #exportPanel .selection-list-button-group { flex-wrap: wrap; }
+#exportPanel .backup-tracks-card {
+    min-width: 0;
+    border: 1px solid #565c66;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #202226;
+}
+#exportPanel .backup-tracks-title {
+    margin: 0;
+    padding: 12px 14px;
+    background: #191b1e;
+    border-bottom: 1px solid #554735;
+    color: #ffc078;
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+#exportPanel .backup-tracks-title strong { font-weight: 700; }
+#exportPanel .backup-tracks-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 14px 0;
+}
+#exportPanel .backup-tracks-toolbar button { padding: 6px 10px; font-size: 12px; line-height: 1.2; border-radius: 8px; }
+#exportPanel .backup-tracks-toolbar .selection-list-button-group { margin-left: auto; }
+#exportPanel .backup-tracks-card > .selection-list {
+    border: 0;
+    border-radius: 0;
+}
 /* Let nested grids shrink with the CEP panel instead of using content width. */
 #exportPanel .app, #exportPanel .stack, #exportPanel .field {
     grid-template-columns: minmax(0, 1fr);
@@ -874,7 +924,6 @@ body[data-active-tool="export"] { background: #1c1c1d; }
 
         </div>
         <div class="stack">
-            <div class="section-label" style="margin-top: 16px;">Tracks to back up</div>
             <div class="track-warning">Before exporting, turn off <strong>Solo</strong> on all audio tracks.</div>
             <div class="compact-export-settings">
                 <div class="track-row">
@@ -890,7 +939,17 @@ body[data-active-tool="export"] { background: #1c1c1d; }
                     <span id="autoEmptyTrackPreview" class="small-note" role="status" aria-live="polite" hidden></span>
                 </div>
             </div>
-            <div id="exportSelectionList" class="selection-list"><div class="small-note">Refresh to load tracks.</div></div>
+            <div class="backup-tracks-card">
+                <div class="backup-tracks-title"><strong id="detectedBackupSequenceName">No active sequence</strong></div>
+                <div class="backup-tracks-toolbar">
+                    <button id="toggleAllBackupTracksButton" class="secondary" type="button" onclick="toggleAllBackupTracks()" disabled>Select all</button>
+                    <span class="selection-list-button-group">
+                        <button id="mergeAudioButton" class="secondary" type="button" onclick="mergeSelectedAudioTracks()" hidden>Merge Selection</button>
+                        <button id="clearAudioMergesButton" class="secondary" type="button" onclick="clearAudioMerges()" hidden>Clear Merges</button>
+                    </span>
+                </div>
+                <div id="exportSelectionList" class="selection-list"><div class="small-note">Refresh to load tracks.</div></div>
+            </div>
             <div class="backup-action-row">
                 <button id="exportButton" onclick="runExport(false)">Backup</button>
                 <button id="rebackupButton" class="secondary" onclick="runExport(true)">Re-backup</button>
@@ -980,10 +1039,18 @@ body[data-active-tool="export"] { background: #1c1c1d; }
         </div>
     </div>
 </div>
+<div id="fileRetryPrompt" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="fileRetryTitle">
+    <div class="dialog-panel stack">
+        <h2 id="fileRetryTitle">Waiting to import</h2>
+        <p id="fileRetryMessage" class="dialog-copy" aria-live="polite"></p>
+        <ul id="fileRetryFiles"></ul>
+        <div class="dialog-actions"><button id="fileRetryCancel" type="button" class="secondary">Cancel</button></div>
+    </div>
+</div>
 <div id="cleanupRetryPrompt" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="cleanupRetryTitle" tabindex="-1">
     <div id="cleanupRetryPanel" class="dialog-panel cleanup-dialog-panel stack">
         <h2 id="cleanupRetryTitle">Cleanup is retrying</h2>
-        <p id="cleanupRetryMessage" class="dialog-copy"></p>
+        <div id="cleanupRetryMessage" class="dialog-copy"></div>
         <div class="dialog-actions">
             <button id="cleanupRetryCloseButton" type="button" class="secondary">Close</button>
             <button id="cleanupRetryAlignButton" type="button">Align Existing</button>

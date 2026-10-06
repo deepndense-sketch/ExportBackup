@@ -1,5 +1,5 @@
 {
-  "version": "5.0.5",
+  "version": "6.0.0",
   "channel": "main",
-  "notes": "• Export Backup fits narrow panels without its inner section overflowing.\n• Project Collector has simpler checkbox options, shorter labels, and consistent sentence case.\n• Path and the green Refresh button are inside the media-selection card, with a divider below Path.\n• Selected and nested sequence media is always collected, subject to ignore settings; its checkbox is no longer shown.\n• Copy project starts checked for new settings and remembers your choice.\n• Restart Premiere after updating."
+  "notes": "• Finds existing backups in the selected folder and remembers backup locations per project.\n• Restores previous audio merge groups and adds Select all / Deselect all.\n• Re-backup exports the current In/Out selection to temporary files before replacing old backups.\n• Automatic import uses the Align Existing workflow. File-lock retries release unused references, save once, and wait six seconds; Cancel stops retries.\n• Removes unused duplicate plugin backup items while preserving items used by sequences and unrelated media.\n• Clearer sequence titles, smaller organized dialog details, and fewer repeated refresh checks.\n• Save your project and restart Premiere after updating."
 }

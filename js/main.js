@@ -259,6 +259,7 @@ function setBusyState(nextBusy) {
     setDisabled("incrementBackupTrackButton", nextBusy);
     setDisabled("mergeAudioButton", nextBusy);
     setDisabled("clearAudioMergesButton", nextBusy);
+    setDisabled("toggleAllBackupTracksButton", nextBusy);
     setDisabled("categoryNameInput", nextBusy);
     setDisabled("addCategoryButton", nextBusy);
     setDisabled("deleteCategoryButton", nextBusy);
@@ -422,6 +423,32 @@ function isLockedFileRecoveryMessage(message) {
 }
 
 let readablePromptQueue = Promise.resolve();
+function renderDialogDetails(container, message) {
+    container.textContent = '';
+    let first = true;
+    let list = null;
+    String(message || '').split(/\r?\n/).forEach(line => {
+        if (!line.trim()) { list = null; return; }
+        let text = line;
+        try { text = decodeURIComponent(text); } catch (_) {}
+        if (first) {
+            const summary = document.createElement('p');
+            summary.className = 'dialog-summary';
+            summary.textContent = text;
+            container.appendChild(summary);
+            first = false;
+        } else {
+            if (!list) {
+                list = document.createElement('ul');
+                list.className = 'dialog-detail-list';
+                container.appendChild(list);
+            }
+            const item = document.createElement('li');
+            item.textContent = text.replace(/^\s*[•*]\s+/, '');
+            list.appendChild(item);
+        }
+    });
+}
 function showReadablePrompt(options) {
     const pending = readablePromptQueue.then(() => new Promise(resolve => {
         const dialog = document.getElementById('readablePrompt');
@@ -446,7 +473,7 @@ function showReadablePrompt(options) {
             detailsButton.setAttribute('aria-expanded', String(!body.hidden));
         };
         document.getElementById('readablePromptTitle').textContent = options.title || 'Backup Project';
-        body.textContent = String(options.message || '');
+        renderDialogDetails(body, options.message);
         yes.textContent = options.confirmText || 'OK';
         no.hidden = !options.cancelText;
         no.textContent = options.cancelText || 'Cancel';
@@ -508,7 +535,7 @@ function showCleanupRetryPrompt(title, message, kind) {
     }
 
     titleElement.textContent = (kind === 'success' ? '✓ ' : kind === 'error' ? '× ' : '! ') + String(title || "Cleanup in progress");
-    messageElement.textContent = String(message || "");
+    renderDialogDetails(messageElement, message);
     panel.classList.toggle("is-success", kind === "success");
     panel.classList.toggle("is-error", kind === "error");
     alignButton.classList.toggle("is-hidden", kind === "success");
@@ -1356,15 +1383,10 @@ function loadSavedPaths() {
     try {
         const savedDestination = localStorage.getItem(BACKUP_DESTINATION_STORAGE_KEY);
         const destinationInputs = getBackupDestinationInputs();
-        if (savedDestination === BACKUP_DESTINATION_PROJECT_ROOT && destinationInputs.projectRoot) {
-            destinationInputs.projectRoot.checked = true;
-        } else if (savedDestination === BACKUP_DESTINATION_PARENT_FOLDER && destinationInputs.parentFolder) {
-            destinationInputs.parentFolder.checked = true;
-        } else if (savedDestination === BACKUP_DESTINATION_MANUAL && destinationInputs.manual) {
-            destinationInputs.manual.checked = true;
-        } else if (destinationInputs.ftp) {
-            destinationInputs.ftp.checked = true;
-        }
+        const restoredMode=Object.prototype.hasOwnProperty.call(destinationInputs,savedDestination) ? savedDestination : BACKUP_DESTINATION_FTP;
+        Object.keys(destinationInputs).forEach(key=>{if (destinationInputs[key]) destinationInputs[key].checked=key===restoredMode;});
+        const selector=document.getElementById('backupDestinationSelect');
+        if (selector) selector.value=restoredMode;
     } catch (error) {}
 
     try {
@@ -1880,6 +1902,8 @@ async function getExportSelectionInfo() {
 }
 
 function renderExportSelectionList(selectionInfo) {
+    const detectedSequence = document.getElementById('detectedBackupSequenceName');
+    if (detectedSequence) detectedSequence.textContent = selectionInfo && selectionInfo.ok && selectionInfo.sequenceName || 'No active sequence';
     const container = document.getElementById("exportSelectionList");
     if (!container) {
         return;
@@ -1888,6 +1912,7 @@ function renderExportSelectionList(selectionInfo) {
     if (!selectionInfo || !selectionInfo.ok) {
         container.innerHTML = `<div class="small-note">${(selectionInfo && selectionInfo.message) || "Could not read export selection."}</div>`;
         exportSelectionState = null;
+        updateToggleAllBackupTracksButton();
         return;
     }
 
@@ -1901,6 +1926,7 @@ function renderExportSelectionList(selectionInfo) {
 
     if (!items.length) {
         container.innerHTML = `<div class="small-note">${selectionInfo.message || "No used audio tracks were found in the active sequence yet. The backup MP4 will still be queued."}</div>`;
+        updateToggleAllBackupTracksButton();
         return;
     }
 
@@ -1917,9 +1943,7 @@ function renderExportSelectionList(selectionInfo) {
             ? `Merged group: ${existingGroup.trackNumbers.join(", ")}`
             : (item.kind === "audio" && item.trackName ? item.trackName : "");
         let mergeControl = `<span></span>`;
-        if (item.kind === "video") {
-            mergeControl = `<span class="selection-list-button-group"><button id="mergeAudioButton" class="secondary selection-list-merge-button" type="button" onclick="mergeSelectedAudioTracks()">Merge Selection</button><button id="clearAudioMergesButton" class="secondary selection-list-merge-button" type="button" onclick="clearAudioMerges()">Clear Merges</button></span>`;
-        } else if (item.kind === "audio") {
+        if (item.kind === "audio") {
             mergeControl = `<label class="merge-checkbox-wrap" for="${mergeCheckboxId}"><span>Merge</span><input class="merge-checkbox" type="checkbox" id="${mergeCheckboxId}" data-kind="audio" data-track-number="${item.trackNumber || 0}" data-merged-group="${existingGroup ? existingGroup.id : ""}" ${existingGroup ? "checked disabled" : ""}></label>`;
         }
 
@@ -1934,15 +1958,54 @@ function renderExportSelectionList(selectionInfo) {
             `</div>`
         );
     }).join("");
-    container.onchange = updateMergeActionVisibility;
+    container.onchange = handleExportSelectionChange;
+    updateMergeActionVisibility();
+}
+
+function handleExportSelectionChange(event) {
+    const input = event && event.target;
+    if (input && input.classList.contains('queue-checkbox') && input.getAttribute('data-kind') === 'audio') {
+        const number = parseInt(input.getAttribute('data-track-number'), 10);
+        const group = mergedAudioGroups.find(group => group.trackNumbers.includes(number));
+        const container = document.getElementById('exportSelectionList');
+        if (group && container) {
+            Array.from(container.querySelectorAll('.queue-checkbox[data-kind="audio"]')).forEach(other => {
+                if (!other.disabled && group.trackNumbers.includes(parseInt(other.getAttribute('data-track-number'), 10))) {
+                    other.checked = input.checked;
+                }
+            });
+        }
+    }
     updateMergeActionVisibility();
 }
 
 function updateMergeActionVisibility() {
+    updateToggleAllBackupTracksButton();
     const merge = document.getElementById("mergeAudioButton");
     const clear = document.getElementById("clearAudioMergesButton");
     if (merge) merge.hidden = getUnmergedCheckedAudioInputs().length < 2;
     if (clear) clear.hidden = !mergedAudioGroups.length;
+}
+
+function getSelectableBackupTrackInputs() {
+    const container = document.getElementById('exportSelectionList');
+    return container ? Array.from(container.querySelectorAll('.queue-checkbox')).filter(input => !input.disabled) : [];
+}
+
+function updateToggleAllBackupTracksButton() {
+    const button = document.getElementById('toggleAllBackupTracksButton');
+    if (!button) return;
+    const inputs = getSelectableBackupTrackInputs();
+    button.textContent = inputs.length && inputs.every(input => input.checked) ? 'Deselect all' : 'Select all';
+    button.disabled = busy || !inputs.length;
+}
+
+function toggleAllBackupTracks() {
+    if (busy) return;
+    const inputs = getSelectableBackupTrackInputs();
+    const checked = !inputs.every(input => input.checked);
+    inputs.forEach(input => { input.checked = checked; });
+    updateToggleAllBackupTracksButton();
 }
 
 function clearAudioMerges() {
@@ -2030,20 +2093,47 @@ function getSelectedQueueItems() {
         includeVideo: videoInput ? !!videoInput.checked : true,
         audioTracks: checkedTracks.filter(number => !selectedGroups.some(group => group.includes(number))),
         audioGroups: selectedGroups,
+        useDisplayedAudioGroups: true,
         preserveUnselectedAudio: audioInputs.some(input => !input.checked || input.disabled),
         replaceAudioLayout: true
     };
 }
 
+async function loadExistingBackupGroups(selectionInfo) {
+    if (!selectionInfo || !selectionInfo.ok) return selectionInfo;
+    try {
+        const destination = await resolveExportActionDestination(true, selectionInfo.backupInspection);
+        const existing = destination.existingBackup;
+        if (!existing || existing.sequenceName !== selectionInfo.sequenceName) return selectionInfo;
+        const current = (selectionInfo.items || []).filter(item => item.kind === 'audio').map(item => item.trackNumber);
+        selectionInfo.audioGroups = (existing.layout.audioOutputs || [])
+            .map(item => (item.sourceTrackNumbers || [item.sourceTrackNumber]).filter(number => current.includes(number)))
+            .filter(group => group.length > 1);
+    } catch (error) {
+        // A fresh backup has no files yet. Keep the normal source-track list.
+    }
+    return selectionInfo;
+}
+
+let exportSelectionRefreshPending = false;
 async function refreshExportSelection() {
-    if (busy) {
+    if (busy || exportSelectionRefreshPending) {
         return;
     }
 
-    renderExportSelectionList({ ok: true, items: [], message: "Reading active sequence tracks..." });
-    const selectionInfo = await getExportSelectionInfo();
-    renderExportSelectionList(selectionInfo);
-    await refreshAutoEmptyTrackPreview();
+    exportSelectionRefreshPending = true;
+    try {
+        renderExportSelectionList({ ok: true, items: [], message: "Reading active sequence tracks..." });
+        const selectionInfo = await getExportSelectionInfo();
+        if (selectionInfo && selectionInfo.ok) {
+            renderExportSelectionList({ ok: true, items: [], message: "Checking existing backup files..." });
+            await loadExistingBackupGroups(selectionInfo);
+        }
+        renderExportSelectionList(selectionInfo);
+        await refreshAutoEmptyTrackPreview();
+    } finally {
+        exportSelectionRefreshPending = false;
+    }
 }
 
 function getExportSelectionTrackSignature(selectionInfo) {
@@ -2057,6 +2147,9 @@ function getExportSelectionTrackSignature(selectionInfo) {
 }
 
 async function syncExportSelectionWithActiveTimeline() {
+    if (exportSelectionRefreshPending) return false;
+    exportSelectionRefreshPending = true;
+    try {
     const latestSelection = await getExportSelectionInfo();
     if (!latestSelection || !latestSelection.ok) {
         throw new Error((latestSelection && latestSelection.message) || "Could not read the active sequence audio tracks.");
@@ -2064,8 +2157,11 @@ async function syncExportSelectionWithActiveTimeline() {
 
     const previousSignature = getExportSelectionTrackSignature(exportSelectionState);
     const latestSignature = getExportSelectionTrackSignature(latestSelection);
-    if (!exportSelectionState || previousSignature !== latestSignature || exportSelectionState.sequenceName !== latestSelection.sequenceName) {
-        if (exportSelectionState && exportSelectionState.sequenceName === latestSelection.sequenceName) {
+    const sameSequence = exportSelectionState && exportSelectionState.sequenceName === latestSelection.sequenceName &&
+        exportSelectionState.sequenceID === latestSelection.sequenceID && exportSelectionState.projectPath === latestSelection.projectPath;
+    if (!sameSequence || previousSignature !== latestSignature || JSON.stringify(exportSelectionState.selectionRange) !== JSON.stringify(latestSelection.selectionRange)) {
+        await loadExistingBackupGroups(latestSelection);
+        if (sameSequence) {
             const container = document.getElementById('exportSelectionList');
             const choices = {};
             if (container) Array.from(container.querySelectorAll('.queue-checkbox')).forEach(input => {
@@ -2083,6 +2179,9 @@ async function syncExportSelectionWithActiveTimeline() {
         return true;
     }
     return false;
+    } finally {
+        exportSelectionRefreshPending = false;
+    }
 }
 
 function parseTrackNumbersFromFileName(name, baseName) {
@@ -2262,14 +2361,14 @@ function scanExportFolderForSequence(folderPath, sequenceName, manifest, options
                 return;
             }
 
-            if (!videoPath && lowerName.startsWith(backupPrefix)) {
+            if (!videoPath && lowerName.startsWith(backupPrefix) && /\.(mp4|mov|mxf|avi|m4v)$/i.test(fileName)) {
                 videoPath = absolutePath;
                 return;
             }
 
             const trackNumbers = parseTrackNumbersFromFileName(fileName, sanitizedBase);
             const trackNumber = trackNumbers.length ? trackNumbers[0] : 0;
-            if (trackNumber > 0 && !audio.some((entry) => entry.path === absolutePath)) {
+            if (trackNumber > 0 && /\.(wav|mp3)$/i.test(fileName) && !audio.some((entry) => entry.path === absolutePath)) {
                 audio.push({
                     path: absolutePath,
                     trackNumber,
@@ -2342,36 +2441,66 @@ async function waitForFileState(description, verifier) {
     throw new Error(`${description} did not finish in Windows yet.`);
 }
 
-async function runLocalFileStepWithRetry(title, details, action, verifier) {
-    let lastError = null;
-    const retryDelays = [10000];
-
-    while (true) {
-        for (let attempt = 1; attempt <= 2; attempt += 1) {
-            if (attempt > 1) {
-                const waitSeconds = Math.round(retryDelays[attempt - 2] / 1000);
-                await waitBeforeLocalFileStep(
-                    `Retrying ${title} in ${waitSeconds} seconds.\n` +
-                    `${details}\n` +
-                    `Retry ${attempt - 1}/1.\n` +
-                    `Last error: ${lastError ? lastError.message : "unknown"}`,
-                    retryDelays[attempt - 2]
-                );
-            }
-
+async function runLocalFileStepWithRetry(title, details, action, verifier, beforeRetry) {
+    const prompt = document.getElementById('fileRetryPrompt');
+    const cancel = document.getElementById('fileRetryCancel');
+    const message = document.getElementById('fileRetryMessage');
+    const files = document.getElementById('fileRetryFiles');
+    files.textContent = '';
+    String(details || '').split('\n').filter(line => line && !/^File \d+\/\d+:/.test(line)).forEach(line => {
+        let label = line;
+        try { label = decodeURIComponent(label); } catch (_) {}
+        const prefix = label.match(/^(TEMP|Final):\s*/i);
+        const filePath = prefix ? label.slice(prefix[0].length) : label;
+        const item = document.createElement('li');
+        item.textContent = (prefix ? (prefix[1].toLowerCase() === 'temp' ? 'New export: ' : 'Backup: ') : '') + filePath.split(/[\\/]/).pop();
+        item.title = filePath;
+        files.appendChild(item);
+    });
+    let cancelled = false;
+    let wake = null;
+    const stop = () => { cancelled = true; if (wake) wake(); };
+    const keydown = event => {
+        if (event.key === 'Escape') { event.preventDefault(); stop(); }
+    };
+    cancel.onclick = stop;
+    prompt.addEventListener('keydown', keydown);
+    try {
+        for (let attempt = 1; !cancelled; attempt += 1) {
             try {
-                setStatus(`${title}\n${details}\nAttempt ${attempt}/2.`);
+                message.textContent = `Trying to import — attempt ${attempt}. Waiting for the file operation to finish…`;
+                setStatus(`${title}\n${details}\nAttempt ${attempt}.`);
                 await action();
                 await waitForFileState(title, verifier);
                 return;
             } catch (error) {
-                lastError = error;
+                // Only file locks are transient. Missing exports and conflicting
+                // recovery files require attention rather than endless retries.
+                if (!['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) throw error;
+                if (cancelled) break;
+                prompt.classList.remove('is-hidden');
+                cancel.focus();
+                if (beforeRetry) {
+                    message.textContent = `Releasing unused backup references and saving Premiere before retry ${attempt + 1}…`;
+                    await beforeRetry();
+                    if (cancelled) break;
+                }
+                for (let seconds = 6; seconds > 0 && !cancelled; seconds -= 1) {
+                    message.textContent = `File still busy after attempt ${attempt}. Retrying in ${seconds} ${seconds === 1 ? 'second' : 'seconds'}… Import will continue automatically.`;
+                    await new Promise(resolve => {
+                        const timer = setTimeout(() => { wake = null; resolve(); }, 1000);
+                        wake = () => { clearTimeout(timer); wake = null; resolve(); };
+                    });
+                }
             }
         }
-
-        const recoveryMessage = "File still busy\n\nPress Align Existing button to delete and import re-export.";
-        setStatus(recoveryMessage);
-        throw new Error(recoveryMessage);
+        const error = new Error('Automatic import cancelled. Use Align Existing when ready to resume.');
+        error.code = 'IMPORT_CANCELLED';
+        throw error;
+    } finally {
+        prompt.classList.add('is-hidden');
+        cancel.onclick = null;
+        prompt.removeEventListener('keydown', keydown);
     }
 }
 
@@ -2582,7 +2711,7 @@ async function removeFileIfExists(filePath, description) {
         "The completed replacement export was left untouched."
     );
 }
-async function replaceRebackupFile(entry, fileIndex, totalFiles) {
+async function replaceRebackupFile(entry, fileIndex, totalFiles, manifest) {
     const label = entry && entry.name ? entry.name : path.basename((entry && (entry.finalPath || entry.path)) || "backup file");
     const prefix = `File ${fileIndex}/${totalFiles}: ${label}`;
 
@@ -2593,12 +2722,16 @@ async function replaceRebackupFile(entry, fileIndex, totalFiles) {
         () => fileExists(entry.path)
     );
 
-    if (entry.oldFinalPath && entry.oldFinalPath !== entry.finalPath) {
-        await removeFileIfExists(entry.oldFinalPath, "old-format backup file");
+    // Renaming within the same folder avoids copying a multi-GB old export.
+    // Journal the rollback path before touching the final filename.
+    entry.replacementSize=fs.statSync(entry.path).size;
+    if (!entry.swapRollbackPath) {
+        const parsedPath=path.parse(entry.finalPath);
+        entry.swapRollbackPath=path.join(parsedPath.dir,`${parsedPath.name}_REBKP_OLD_${Date.now()}_${fileIndex}${parsedPath.ext}`);
+        entry.preservedPaths=(entry.preservedPaths || []).concat(entry.swapRollbackPath);
+        if (entry.oldFinalPath && entry.oldFinalPath !== entry.finalPath) entry.preservedPaths.push(entry.oldFinalPath);
     }
-
-    await removeFileIfExists(entry.finalPath, "old final backup file");
-
+    if (manifest) writeExportManifest(manifest);
     await runLocalFileStepWithRetry(
         "Renaming TEMP file to final backup name",
         `${prefix}\nTEMP: ${entry.path}\nFinal: ${entry.finalPath}`,
@@ -2606,9 +2739,28 @@ async function replaceRebackupFile(entry, fileIndex, totalFiles) {
             if (!fileExists(entry.path)) {
                 throw new Error(`TEMP file is missing: ${entry.path}`);
             }
-            fs.renameSync(entry.path, entry.finalPath);
+            if (fileExists(entry.finalPath)) {
+                if (fileExists(entry.swapRollbackPath)) throw new Error('Both the old final and rollback file exist. Replacement stopped to preserve both files.');
+                fs.renameSync(entry.finalPath, entry.swapRollbackPath);
+            }
+            try {
+                fs.renameSync(entry.path, entry.finalPath);
+            } catch(error) {
+                if (!fileExists(entry.finalPath) && fileExists(entry.swapRollbackPath)) {
+                    fs.renameSync(entry.swapRollbackPath,entry.finalPath);
+                }
+                throw error;
+            }
         },
-        () => fileExists(entry.finalPath) && !fileExists(entry.path)
+        () => fileExists(entry.finalPath) && !fileExists(entry.path),
+        async () => {
+            const projectPath = manifest && manifest.projectPath || '';
+            const retryPaths = JSON.stringify([entry.path, entry.finalPath, entry.swapRollbackPath].filter(Boolean));
+            const result = parseHostResult(await callHost(`exportBackup.prepareImportRetry("${escapeForEvalScript(projectPath)}","${escapeForEvalScript(retryPaths)}")`));
+            if (!result || result.ok === false) {
+                throw new Error(result && result.message || 'Could not save Premiere before retrying import.');
+            }
+        }
     );
 
     setStatus(
@@ -2654,6 +2806,15 @@ function getIncompleteExpectedExportPaths(manifest) {
 }
 
 function assertExpectedExportsAreReady(manifest) {
+    if (manifest && manifest.temporaryExport && manifest.exportFailed) {
+        throw new Error('This temporary export did not report successful completion. The old backups are kept. Do not replace them with potentially incomplete TEMP files.');
+    }
+    // Recover a panel interruption between the successful rename and journal update.
+    (manifest && manifest.expectedFiles || []).forEach(entry=>{
+        if (!entry.swapRollbackPath || !entry.replacementSize || fileExists(entry.path) ||
+            !fileExists(entry.finalPath) || !fileExists(entry.swapRollbackPath)) return;
+        if (fs.statSync(entry.finalPath).size === entry.replacementSize) entry.path=entry.finalPath;
+    });
     const incompletePaths = getIncompleteExpectedExportPaths(manifest);
     if (incompletePaths.length) {
         throw new Error([
@@ -2672,20 +2833,20 @@ async function finalizeRebackupFiles(manifest) {
         throw new Error("Re-backup cleanup was not verified, so local backup files were not finalized.");
     }
 
-    // Only legacy _REBKP_TEMP recovery needs a blocking filesystem change
-    // before import. Current Re-backup exports already use their final paths.
+    // Old media stays at its original path until every selected render finishes.
     if (replacementFiles.length) {
         await waitBeforeLocalFileStep(
-            "Premiere cleanup is done. Legacy TEMP-file recovery will start next.",
+            "Premiere cleanup is done. Replacing completed backup files...",
             1500
         );
-        setStatus(`Recovering legacy TEMP files.\nFiles to rename: ${replacementFiles.length}.`);
+        setStatus(`Replacing completed TEMP files.\nFiles to rename: ${replacementFiles.length}.`);
 
         for (let i = 0; i < replacementFiles.length; i += 1) {
             const entry = replacementFiles[i];
-            await replaceRebackupFile(entry, i + 1, replacementFiles.length);
+            await replaceRebackupFile(entry, i + 1, replacementFiles.length, manifest);
             entry.path = entry.finalPath;
             entry.name = path.basename(entry.finalPath);
+            writeExportManifest(manifest);
         }
     }
 
@@ -2696,11 +2857,14 @@ async function finalizeRebackupFiles(manifest) {
 async function cleanupRebackupPreservedFilesAfterAlignment(manifest, retryDelays, premierePendingPaths) {
     const expectedFiles = manifest && Array.isArray(manifest.expectedFiles) ? manifest.expectedFiles : [];
     const preservedPaths = getManifestPreservedPaths(manifest);
+    const blockedKeys = new Set((premierePendingPaths || []).map(getPathComparisonKey));
+    const blockedPaths = preservedPaths.filter(filePath => blockedKeys.has(getPathComparisonKey(filePath)));
     const cleanupResult = await cleanupLocalFilesBestEffort(
-        preservedPaths,
+        preservedPaths.filter(filePath => !blockedKeys.has(getPathComparisonKey(filePath))),
         "preserved old backup files",
         retryDelays
     );
+    cleanupResult.pending = getUniqueCleanupPaths(cleanupResult.pending.concat(blockedPaths));
     const retainedKeys = {};
 
     cleanupResult.pending.forEach((filePath) => {
@@ -2943,7 +3107,11 @@ function findBackupLeftovers(matchInfo) {
 }
 
 async function cleanupDiscoveredBackupLeftovers(matchInfo) {
-    const candidates = findBackupLeftovers(matchInfo);
+    const owners = getBackupClipOwners();
+    const knownPaths = Object.keys(owners).map(key => owners[key] && owners[key].path).filter(Boolean)
+        .concat(getManifestPreservedPaths(matchInfo.manifest));
+    const knownKeys = new Set(knownPaths.map(getPathComparisonKey));
+    const candidates = findBackupLeftovers(matchInfo).filter(entry => knownKeys.has(getPathComparisonKey(entry.path)));
     if (!candidates.length) return {deleted:[],retained:[]};
     const result = parseHostResult(await callHost(`exportBackup.releaseUnusedBackupLeftovers("${escapeForEvalScript(JSON.stringify(candidates.map(entry => entry.path)))}")`));
     if (!result || !result.ok) throw new Error(result && result.message || 'Could not verify backup leftover usage.');
@@ -3039,6 +3207,11 @@ async function prepareRebackupReplacement(manifest) {
     const remainingProjectPaths = Array.isArray(parsed.remainingProjectPaths)
         ? parsed.remainingProjectPaths
         : [];
+    if (remainingProjectPaths.length) {
+        manifest.premiereCleanupPendingPaths = remainingProjectPaths.slice();
+        writeExportManifest(manifest);
+        throw new Error('Premiere still contains old backup project items. Disk replacement was stopped.\n' + remainingProjectPaths.join('\n'));
+    }
     setStatus(
         (remainingProjectPaths.length
             ? "Premiere replacement preparation complete; old ProjectItem cleanup will retry after import.\n"
@@ -3105,11 +3278,11 @@ async function retryPremierePreservedMediaRelease(manifest) {
         }
 
         setStatus("New files are aligned. Releasing preserved old Premiere references before optional file cleanup...");
-        const cleanupFilesJson = JSON.stringify(cleanupFiles);
-        const result = await callHost(`exportBackup.prepareRebackupReplacement("${escapeForEvalScript(cleanupFilesJson)}")`);
+        const cleanupPathsJson = JSON.stringify(attemptedPaths);
+        const result = await callHost(`exportBackup.releaseUnusedBackupLeftovers("${escapeForEvalScript(cleanupPathsJson)}")`);
         const parsed = parseHostResult(result);
         const remainingProjectPaths = parsed && parsed.ok !== false
-            ? (Array.isArray(parsed.remainingProjectPaths) ? parsed.remainingProjectPaths : [])
+            ? (Array.isArray(parsed.retainedPaths) ? parsed.retainedPaths : attemptedPaths)
             : attemptedPaths;
 
         manifest.premiereCleanupPendingPaths = remainingProjectPaths.slice();
@@ -3240,98 +3413,33 @@ function queuePendingCleanupRetry(state) {
 }
 
 async function runPendingCleanupRetryAttempt(state) {
-    if (!state || cleanupRetryState !== state || state.running) {
-        return;
-    }
-
+    if (!state || cleanupRetryState !== state || state.running) return;
     state.running = true;
     state.attempt += 1;
-    if (!state.dialogDismissed) {
-        showCleanupRetryPrompt(
-            "ALIGN EXISTING IN PROGRESS",
-            `Removing the currently aligned backup clips and importing them again.\n\nAutomatic attempt ${state.attempt}.\nIf this is taking time, you can press Align Existing between attempts.`,
-            "pending"
-        );
-    }
-    setStatus(
-        `Automatic Align Existing retry ${state.attempt}.\n` +
-        "Removing aligned backup clips, importing the files again, and checking old-file cleanup."
-    );
-
     try {
-        const retryContext = {};
-        const alignmentSucceeded = await runAlignmentFlow(state.folderPath, {
-            manifest: state.manifest,
-            manifestOnly: !!state.manifest,
-            skipVideo: false,
-            sortProjectFiles: false,
-            autoTriggered: true,
-            cleanupRetryContext: retryContext
-        });
-        if (cleanupRetryState !== state) {
-            return;
+        const summary = await attemptPostAlignmentCleanup(state.manifest, state.stalePaths, [0]);
+        if (cleanupRetryState !== state) return;
+        state.stalePaths = summary.stalePendingPaths || [];
+        recordPendingCleanup(state.manifest, summary);
+        let pending = summary.pendingCount;
+        if (state.manifest && state.manifest.manifestPath) {
+            if (pending) writeExportManifest(state.manifest);
+            else if (!deleteLocalFileNow(state.manifest.manifestPath).ok) pending += 1;
         }
-        if (!alignmentSucceeded) {
-            throw new Error(retryContext.error || "Automatic Align Existing retry did not finish.");
-        }
-
-        const cleanupSummary = retryContext.cleanupSummary || {
-            stalePendingPaths: [],
-            pendingCount: 0
-        };
-        const pendingCount = parseInt(retryContext.pendingCleanupCount, 10) || 0;
-        state.stalePaths = Array.isArray(cleanupSummary.stalePendingPaths)
-            ? cleanupSummary.stalePendingPaths.slice()
-            : [];
-
-        if (pendingCount === 0) {
+        state.pendingCount = pending;
+        if (!pending) {
             cleanupRetryState = null;
             state.timer = null;
-            setStatus(
-                `${retryContext.successTitle || state.successTitle}\n` +
-                `Align Existing retry completed after ${state.attempt} automatic attempt(s).`,
-                "success"
-            );
-            showCleanupRetryPrompt(
-                "ALIGNMENT AND CLEANUP DONE",
-                "The backup files were imported and aligned again, and all old cleanup items are finished.",
-                "success"
-            );
+            setStatus(`${state.successTitle}\nOld-file cleanup completed.`, 'success');
+            if (!state.dialogDismissed) showCleanupRetryPrompt('CLEANUP DONE', 'Backup files remain aligned. Old-file cleanup is complete.', 'success');
             return;
         }
-
-        setStatus(
-            `${retryContext.successTitle || state.successTitle}\n` +
-            `Files were imported and aligned again. Cleanup items remaining: ${pendingCount}.\n` +
-            "Running Align Existing again in 3 seconds.",
-            "success"
-        );
-        if (!state.dialogDismissed) {
-            showCleanupRetryPrompt(
-                "ALIGN EXISTING IS RETRYING",
-                `The backup files were imported and aligned again.\n\n${pendingCount} cleanup item(s) remain. Running Align Existing again in 3 seconds.`,
-                "pending"
-            );
-        }
+        setStatus(`Backup files are aligned. ${pending} old cleanup item(s) remain. Retrying cleanup only.`, 'success');
+        if (!state.dialogDismissed) showCleanupRetryPrompt('CLEANUP IS RETRYING', 'Backup files are already aligned. Only old-file cleanup is retrying; timeline clips will stay in place.', 'pending');
         queuePendingCleanupRetry(state);
     } catch (error) {
-        if (cleanupRetryState !== state) {
-            return;
-        }
-        const message = error && error.message ? error.message : String(error || "Automatic Align Existing retry failed.");
-        setStatus(
-            `${state.successTitle}\n` +
-            `Automatic Align Existing retry ${state.attempt} could not finish.\n` +
-            `Retrying again in 3 seconds.\n${message}`,
-            "success"
-        );
-        if (!state.dialogDismissed) {
-            showCleanupRetryPrompt(
-                "ALIGN EXISTING IS RETRYING",
-                `The last automatic Align Existing attempt could not finish. Retrying again in 3 seconds.\n\n${message}`,
-                "pending"
-            );
-        }
+        if (cleanupRetryState !== state) return;
+        setStatus('Backup files remain aligned. Cleanup could not finish: ' + error.message, 'warning');
         queuePendingCleanupRetry(state);
     } finally {
         state.running = false;
@@ -3355,8 +3463,8 @@ async function startPendingCleanupRetry(manifest, stalePaths, successTitle, pend
     cleanupRetryState = state;
 
     showCleanupRetryPrompt(
-        "ALIGN EXISTING WILL RETRY",
-        `The first import and alignment finished, but ${state.pendingCount} cleanup item(s) remain.\n\nIn 3 seconds, Backup Project will remove the aligned backup clips, import the files again, and restore their positions.`,
+        "CLEANUP WILL RETRY",
+        `Import and alignment finished. ${state.pendingCount} old cleanup item(s) remain.\n\nCleanup will retry in 3 seconds. The aligned clips will stay in place.`,
         "pending"
     );
     queuePendingCleanupRetry(state);
@@ -3479,12 +3587,15 @@ function createExportManifestFromHostResult(parsed) {
         createdAt: new Date().toISOString(),
         folderPath: exportFolder,
         sequenceName: parsed.sequenceName || "",
+        sequenceID: parsed.sequenceID || '',
         baseName: parsed.baseName || sanitizeSequenceName(parsed.sequenceName || "Active_Sequence"),
         backupVideoTrackNumber: parseInt(parsed.backupVideoTrackNumber, 10) || DEFAULT_BACKUP_VIDEO_TRACK,
         audioFormat: parsed.audioFormat || getSelectedAudioFormat(),
         exportMode: parsed.exportMode || getSelectedExportMode(),
         rebackup: parsed.rebackup === true,
         rebackupPrepared: parsed.rebackupPrepared === true,
+        temporaryExport: parsed.temporaryExport === true,
+        exportFailed: parsed.exportFailed === true,
         rebackupLayout: parsed.rebackupLayout || null,
         exportRange: parsed.exportRange || null,
         expectedFiles: Array.isArray(parsed.queuedFiles) ? parsed.queuedFiles : [],
@@ -3822,7 +3933,7 @@ async function runAlignmentFlow(folderPath, options) {
             manifest.rebackup === true &&
             manifest.rebackupPrepared === true &&
             manifest.rebackupReplacementPrepared !== true &&
-            getManifestPreservedPaths(manifest).length
+            (manifest.temporaryExport || getManifestPreservedPaths(manifest).length)
         ) {
             assertExpectedExportsAreReady(manifest);
             setStatus("New Re-backup files found. Releasing selected old Premiere clips before alignment...");
@@ -3853,7 +3964,9 @@ async function runAlignmentFlow(folderPath, options) {
         if (settings.autoTriggered === false) {
             await confirmLegacyBackupNames([matchInfo.videoPath].concat(matchInfo.audio.map(entry => entry.path)).filter(Boolean));
         }
-        const alignmentCleanup = await prepareAlignExistingCleanup(matchInfo);
+        const alignmentCleanup = matchInfo.manifest && matchInfo.manifest.rebackupReplacementPrepared
+            ? {stalePaths:matchInfo.manifest.obsoleteAudioFiles || []}
+            : await prepareAlignExistingCleanup(matchInfo);
 
         const backupVideoTrackNumber = getPositiveIntValue(
             "exportVideoTrackInput",
@@ -3882,6 +3995,12 @@ async function runAlignmentFlow(folderPath, options) {
         }
 
         applyBackupFileRenames(matchInfo, parsed.renamedFiles);
+        try {
+            rememberProjectBackupLocation(parsed.projectPath,folderPath,[matchInfo.videoPath].concat(matchInfo.audio.map(entry=>entry.path)).filter(Boolean));
+            if (matchInfo.manifest) rememberBackupClipOwners({projectPath:parsed.projectPath,
+                sequenceID:matchInfo.manifest.sequenceID || parsed.sequenceID,
+                queuedFiles:matchInfo.manifest.expectedFiles || [],exportRange:matchInfo.manifest.exportRange});
+        } catch (historyError) { setStatus('Backup aligned, but its folder history could not be saved: '+historyError.message); }
         const cleanupSummary = await attemptPostAlignmentCleanup(
             matchInfo.manifest,
             alignmentCleanup && alignmentCleanup.stalePaths,
@@ -3968,6 +4087,7 @@ async function runAlignmentFlow(folderPath, options) {
         }
         return true;
     } catch (error) {
+        if (error.code === 'IMPORT_CANCELLED') { setStatus(error.message); return false; }
         return reportAlignmentFailure(`Alignment failed.\n${error.message}`);
     } finally {
         setBusyState(false);
@@ -4035,24 +4155,6 @@ async function monitorExportCompletion() {
 
     if (allStable) {
         clearExportCompletionMonitor();
-        if (state.manifest.rebackup) {
-            try {
-                await prepareRebackupReplacement(state.manifest);
-                await finalizeRebackupFiles(state.manifest);
-                writeExportManifest(state.manifest);
-            } catch (error) {
-                if (isLockedFileRecoveryMessage(error.message)) {
-                    showAlignmentRecoveryError(error.message);
-                    return;
-                }
-
-                showAlignmentRecoveryError(
-                    "Re-backup finished exporting, but replacing old files failed.\n" +
-                    error.message
-                );
-                return;
-            }
-        }
         await runAlignmentFlow(state.manifest.folderPath, {
             manifest: state.manifest,
             manifestOnly: true,
@@ -4173,12 +4275,161 @@ async function chooseWavPreset() {
     }
 }
 
-async function resolveExportActionDestination(isRebackup) {
+function validBackupRange(range) {
+    return !!range && Number.isFinite(Number(range.startSeconds)) && Number.isFinite(Number(range.endSeconds)) &&
+        Number(range.startSeconds) >= 0 && Number(range.endSeconds) > Number(range.startSeconds);
+}
+
+function readProjectBackupLocations() {
+    try { return JSON.parse(localStorage.getItem('exportbackup.projectLocations.v1') || '{}'); }
+    catch (error) { return {}; }
+}
+
+function getRememberedBackupFolders(projectPath) {
+    if (!projectPath) return [];
+    const locations=readProjectBackupLocations();
+    const key=getPathComparisonKey(projectPath);
+    const saved=locations[key] || [];
+    const retained=saved.filter(entry=>entry && entry.folderPath && (entry.paths || []).some(fileExists));
+    if (retained.length!==saved.length) {
+        locations[key]=retained;
+        localStorage.setItem('exportbackup.projectLocations.v1',JSON.stringify(locations));
+    }
+    return retained.map(entry=>entry.folderPath);
+}
+
+function rememberProjectBackupLocation(projectPath, folderPath, paths) {
+    if (!projectPath || !folderPath) return;
+    const present=(paths || []).filter(fileExists);
+    if (!present.length) return;
+    const locations=readProjectBackupLocations();
+    const key=getPathComparisonKey(projectPath);
+    const previous=locations[key] || [];
+    const same=previous.find(entry=>getPathComparisonKey(entry.folderPath)===getPathComparisonKey(folderPath));
+    locations[key]=[{folderPath,paths:Array.from(new Set(present.concat(same && same.paths || [])))}]
+        .concat(previous.filter(entry=>entry!==same));
+    localStorage.setItem('exportbackup.projectLocations.v1',JSON.stringify(locations));
+}
+
+function backupLayoutEntries(layout) {
+    return [layout && layout.video, layout && layout.backupAudio].concat(layout && layout.audioOutputs || []).filter(Boolean);
+}
+
+function discoverBackupFiles(existing, folders) {
+    const original = existing.layout || {};
+    const layout = {baseName:original.baseName || existing.baseName, video:null, backupAudio:null, audioOutputs:[]};
+    const owners = Object.values(getBackupClipOwners());
+    const manifests = [];
+    const audioByGroup = {};
+    const key = value => getPathComparisonKey(value || '');
+    const names = Array.from(new Set([existing.sequenceName, original.baseName, existing.baseName].filter(Boolean)));
+    let foundInFolder = '';
+    function add(entry, kind, baseName, manifest) {
+        if (!entry || !entry.path || !fileExists(entry.path)) return;
+        const live = backupLayoutEntries(original).find(item => key(item.currentMediaPath || item.mediaPath) === key(entry.path));
+        const saved = manifest && backupLayoutEntries(manifest.rebackupLayout).find(item => key(item.mediaPath) === key(entry.path));
+        const owner = owners.find(item => item && String(item.sequenceID) === String(existing.sequenceID) &&
+            key(item.projectPath) === key(existing.projectPath) && key(item.path) === key(entry.path));
+        const recordedRange = [owner && owner.exportRange, entry.exportRange, saved, manifest && manifest.exportRange].find(validBackupRange);
+        const moved = validBackupRange(live) && recordedRange && Math.abs(Number(live.startSeconds) - Number(recordedRange.startSeconds)) >= 0.001;
+        const range = moved ? live : (recordedRange || (validBackupRange(live) ? live : null));
+        // Saved track indices can be stale. Only live Premiere evidence supplies a target track.
+        const item = Object.assign({}, live || {}, {mediaPath:entry.path, currentMediaPath:entry.path,
+            backupLocation:live && live.backupLocation || 'disk',
+            targetTrackNumber:live && live.targetTrackNumber || 0});
+        if (range) { item.startSeconds=Number(range.startSeconds); item.endSeconds=Number(range.endSeconds); }
+        if (kind === 'video') {
+            if (!layout.video) { layout.video=item; layout.baseName=baseName; }
+            if (original.backupAudio && key(original.backupAudio.mediaPath) === key(entry.path)) layout.backupAudio=Object.assign({},original.backupAudio);
+        } else {
+            const numbers = entry.trackNumbers && entry.trackNumbers.length ? entry.trackNumbers : [entry.trackNumber];
+            const group = numbers.slice().sort((a,b)=>a-b).join('-');
+            if (!group || audioByGroup[group]) return;
+            item.sourceTrackNumbers=numbers; item.sourceTrackNumber=numbers[0];
+            layout.audioOutputs.push(item); audioByGroup[group]=true;
+            if (!layout.video) layout.baseName=baseName;
+        }
+    }
+    folders.forEach(folder => {
+        if (!folder || !fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return;
+        names.forEach(name => {
+            const manifest=readManifestForSequence(folder,name);
+            if (manifest) manifests.push(manifest);
+            const scan=scanExportFolderForSequence(folder,name,manifest);
+            if ((scan.videoPath || scan.audio.length) && !foundInFolder) foundInFolder=folder;
+            if (scan.videoPath) {
+                const recorded=manifest && (manifest.expectedFiles || []).find(entry=>entry.kind==='video' && key(entry.path)===key(scan.videoPath));
+                add(Object.assign({},recorded || {},{path:scan.videoPath}),'video',scan.baseName,manifest);
+            }
+            scan.audio.forEach(entry=>add(entry,'audio',scan.baseName,manifest));
+        });
+    });
+    backupLayoutEntries(original).forEach(item => {
+        const audio=Array.isArray(item.sourceTrackNumbers) && item.sourceTrackNumbers.length;
+        add({path:item.currentMediaPath || item.mediaPath, trackNumbers:item.sourceTrackNumbers,
+            trackNumber:item.sourceTrackNumber, exportRange:item},audio?'audio':'video',original.baseName,null);
+    });
+    return Object.assign({},existing,{layout, discoveryFolder:foundInFolder, savedManifests:manifests});
+}
+
+async function confirmDiscoveredBackupRange(existing) {
+    const entries=backupLayoutEntries(existing.layout);
+    const known=entries.find(validBackupRange);
+    const missing=entries.filter(entry=>!validBackupRange(entry));
+    if (!missing.length) return true;
+    const range=known || existing.markedRange;
+    if (!validBackupRange(range)) throw new Error('Backup files were found, but their original range is not recorded. Set In/Out to their original section, then try again.');
+    if (!known && !await showReadablePrompt({title:'Confirm backup range',kind:'warning',
+        message:`Backup files exist on disk, but their original timeline position is unknown.\n\nUse the current In/Out range (${Number(range.startSeconds).toFixed(2)}–${Number(range.endSeconds).toFixed(2)} seconds)?\n\nOnly continue if these marks match the original backup section.`,
+        confirmText:'Use this range',cancelText:'Cancel'})) return false;
+    missing.forEach(entry=>{entry.startSeconds=Number(range.startSeconds);entry.endSeconds=Number(range.endSeconds);});
+    return true;
+}
+
+async function confirmRebackupTrackChanges(existing, selection) {
+    const oldGroups=(existing.layout.audioOutputs || []).map(item=>(item.sourceTrackNumbers || [item.sourceTrackNumber]).slice().sort((a,b)=>a-b));
+    const selectedGroups=(selection.audioGroups || []).concat((selection.audioTracks || []).map(number=>[number]));
+    const requested=Array.from(new Set([].concat(...selectedGroups))).sort((a,b)=>a-b);
+    if (!requested.length) { selection.preserveUnselectedAudio=true; return true; }
+    const oldNumbers=Array.from(new Set([].concat(...oldGroups))).sort((a,b)=>a-b);
+    const current=(exportSelectionState.items || []).filter(item=>item.kind==='audio').map(item=>item.trackNumber);
+    // Re-backup follows the previous file grouping, while still respecting
+    // unchecked tracks. Newly added tracks get their own output.
+    const initialGroups=selection.useDisplayedAudioGroups ? selectedGroups : oldGroups;
+    const newGroups=initialGroups.map(group=>group.filter(number=>requested.includes(number) && current.includes(number))).filter(group=>group.length);
+    requested.filter(number=>current.includes(number) && !newGroups.some(group=>group.includes(number))).forEach(number=>newGroups.push([number]));
+    selection.audioGroups=newGroups.filter(group=>group.length>1);
+    selection.audioTracks=newGroups.filter(group=>group.length===1).map(group=>group[0]);
+    const added=current.filter(number=>!oldNumbers.includes(number));
+    const removed=oldNumbers.filter(number=>!current.includes(number));
+    const keys=newGroups.map(group=>group.slice().sort((a,b)=>a-b).join('-'));
+    if (!added.length && !removed.length) return true;
+    const obsolete=(existing.layout.audioOutputs || []).filter(item=>{
+        const numbers=item.sourceTrackNumbers || [item.sourceTrackNumber];
+        return !keys.includes(numbers.join('-')) && (!selection.preserveUnselectedAudio || numbers.every(number=>requested.includes(number)));
+    });
+    const lines=[`Previous backup tracks: ${oldNumbers.map(n=>'A'+n).join(', ') || 'none'}`,
+        `Previous backup groups: ${oldGroups.map(group=>group.map(n=>'A'+n).join(' + ')).join(', ') || 'none'}`,
+        `Current source tracks: ${current.map(n=>'A'+n).join(', ') || 'none'}`,
+        `Will export: ${newGroups.map(group=>'Track'+group.join('-')).join(', ')}`];
+    if (added.length) lines.push('Added source tracks: '+added.map(n=>'A'+n+(requested.includes(n)?' (will export)':' (not selected)')).join(', '));
+    if (removed.length) lines.push('Previous tracks absent from the current selection range: '+removed.map(n=>'A'+n).join(', '));
+    lines.push(selection.useDisplayedAudioGroups ? 'The export uses the merge groups currently shown in the track list.' : 'Previous merges are reused for selected tracks that still exist. New selected tracks export separately.');
+    if (obsolete.length) lines.push('After successful export, these superseded files will be removed:\n'+obsolete.map(item=>item.mediaPath).join('\n'));
+    lines.push('Track numbers alone cannot identify shifted content. If tracks were inserted or removed, review the mapping before continuing.');
+    return showReadablePrompt({title:'Review changed audio tracks',message:lines.join('\n\n'),kind:'warning',confirmText:'Continue Re-backup',cancelText:'Review tracks'});
+}
+
+async function resolveExportActionDestination(isRebackup, backupInspection) {
     if (!(await ensureHostLoaded())) throw new Error("Could not load Premiere host script.");
-    const existing = parseHostResult(await callHost(`exportBackup.getActiveBackupLayout("${escapeForEvalScript(JSON.stringify(getBackupClipOwners()))}")`));
+    let existing = backupInspection || parseHostResult(await callHost(`exportBackup.getActiveBackupLayout("${escapeForEvalScript(JSON.stringify(getBackupClipOwners()))}")`));
     if (!existing || !existing.ok) throw new Error(existing && existing.message || "Could not inspect existing backups.");
-    const layout = existing.layout || {};
-    const entries = [layout.video, layout.backupAudio].concat(layout.audioOutputs || []).filter(Boolean);
+    let selectedDestination=null;
+    let routingError=null;
+    try { selectedDestination=await resolveProjectBackupFolder({create:false}); } catch(error) { routingError=error; }
+    const folders=[selectedDestination && selectedDestination.folderPath].concat(getRememberedBackupFolders(existing.projectPath),backupLayoutEntries(existing.layout).map(entry=>path.dirname(entry.currentMediaPath || entry.mediaPath || ''))).filter(Boolean);
+    existing=discoverBackupFiles(existing,Array.from(new Set(folders)));
+    const entries = backupLayoutEntries(existing.layout);
     const paths = Array.from(new Set(entries.map((entry) => entry.mediaPath || entry.currentMediaPath).filter(Boolean)));
     if (paths.length) {
         if (!isRebackup) {
@@ -4187,11 +4438,11 @@ async function resolveExportActionDestination(isRebackup) {
             error.promptKind = 'warning';
             throw error;
         }
-        const folderPath = path.dirname(paths[0]);
+        const folderPath = existing.discoveryFolder || path.dirname(paths[0]);
         if (!fs.existsSync(folderPath)) throw new Error("The existing backup folder is unavailable:\n" + folderPath);
         return {folderPath, existingBackup: existing};
     }
-    if (isRebackup) throw new Error("No existing backup files were found for the active sequence. Use Backup to create the first backup.");
+    if (isRebackup) throw new Error(routingError ? `Could not search the selected destination.\n${routingError.message}` : 'No matching backup files were found in the selected folder or Premiere. Check the Path selection and sequence name.');
     return resolveProjectBackupFolder({ create: true });
 }
 
@@ -4232,8 +4483,13 @@ async function runExport(isRebackup) {
     const selectedAudioFormat = getSelectedAudioFormat();
     const selectedAudioPresetPath = selectedAudioFormat === "wav" ? wavPresetPath : mp3PresetPath;
     const backupVideoTrackNumber = getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK);
-    const autoEmptyTrack = !isRebackup && useAutoEmptyBackupTrack();
+    const autoEmptyTrack = useAutoEmptyBackupTrack();
     const selectedQueueItems = getSelectedQueueItems();
+    if (isRebackup && destination.existingBackup) {
+        if (!await confirmRebackupTrackChanges(destination.existingBackup, selectedQueueItems)) return;
+        selectedQueueItems.discoveredBackup={sequenceID:destination.existingBackup.sequenceID,
+            projectPath:destination.existingBackup.projectPath,layout:destination.existingBackup.layout};
+    }
     const removeSequenceMarkers = !!(getRemoveSequenceMarkersCheckbox() && getRemoveSequenceMarkersCheckbox().checked);
     const selectedExportMode = getSelectedExportMode();
 
@@ -4308,6 +4564,16 @@ async function runExport(isRebackup) {
         }
         saveBackupVideoTrack(resolvedBackupVideoTrackNumber);
     }
+    if (isRebackup && validation.rebackupPlan) {
+        try {
+            const pendingManifest=createExportManifestFromHostResult(validation.rebackupPlan);
+            pendingManifest.manifestPath=writeExportManifest(pendingManifest);
+        } catch(error) {
+            setBusyState(false);
+            await showBlockingMessage('Could not save the replacement recovery map. Export was not started.\n'+error.message);
+            return;
+        }
+    }
 setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
         ? (isRebackup ? "Rendering checked re-backup files in Premiere Pro...\nExisting backup clips stay until export finishes." : `Rendering backup files in Premiere Pro...\nBackup track: V${resolvedBackupVideoTrackNumber}`)
         : (isRebackup ? "Queueing checked re-backup jobs...\nExisting backup clips stay until export finishes." : `Queueing backup jobs...\nBackup track: V${resolvedBackupVideoTrackNumber}`));
@@ -4334,7 +4600,7 @@ setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
                 updateAlignFolder(exportFolder);
                 message +=
                     lineBreak + lineBreak +
-                    "Existing backup clips remain linked to preserved old files." +
+                    (parsed.temporaryExport ? "The original backup files were left unchanged. Temporary files may be incomplete." : "Existing backup clips remain linked to preserved old files.") +
                     lineBreak +
                     "Retry Re-backup, or use Align Existing after all new exports exist.";
             } catch (manifestError) {
@@ -4356,12 +4622,6 @@ setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
         try { rememberBackupClipOwners(parsed); }
         catch (ownershipError) { setStatus('Could not save backup clip ownership: ' + ownershipError.message); }
         manifest.manifestPath = writeExportManifest(manifest);
-        if (manifest.rebackup && parsed.exportMode === EXPORT_MODE_PREMIERE) {
-            assertExpectedExportsAreReady(manifest);
-            await prepareRebackupReplacement(manifest);
-            await finalizeRebackupFiles(manifest);
-            manifest.manifestPath = writeExportManifest(manifest);
-        }
         updateAlignFolder(exportFolder);
         applyBackupDefaults({ videoTrackNumber: manifest.backupVideoTrackNumber }, false);
         if (parsed.exportMode === EXPORT_MODE_PREMIERE) {
@@ -4379,6 +4639,7 @@ setStatus(selectedExportMode === EXPORT_MODE_PREMIERE
         }
     } catch (error) {
         setBusyState(false);
+        if (error.code === 'IMPORT_CANCELLED') { setStatus(error.message); return; }
         if (isLockedFileRecoveryMessage(error.message)) {
             showAlignmentRecoveryError(error.message);
             return;
@@ -4413,8 +4674,9 @@ async function alignExistingFolder() {
         const destination = await resolveExportActionDestination(true);
         exportFolder = destination.folderPath;
         const existing = destination.existingBackup;
-        manifest = readManifestForSequence(exportFolder, existing.sequenceName);
-        if (!manifest) manifest = createExistingBackupAlignmentManifest(existing, exportFolder);
+        if (!await confirmDiscoveredBackupRange(existing)) return;
+        manifest = (existing.savedManifests || []).find(item=>item.rebackupPrepared && (item.temporaryExport || getManifestPreservedPaths(item).length))
+            || createExistingBackupAlignmentManifest(existing, exportFolder);
         updateAlignFolder(exportFolder);
         document.getElementById("exportPath").textContent = exportFolder;
     } catch (error) {
@@ -4434,13 +4696,16 @@ function createExistingBackupAlignmentManifest(existing, folderPath) {
     const layout = existing.layout || {};
     const expectedFiles = [];
     const video = layout.video || layout.backupAudio;
-    if (video) expectedFiles.push({kind: "video", path: video.mediaPath || video.currentMediaPath});
+    if (video) expectedFiles.push({kind: "video", path: video.mediaPath || video.currentMediaPath, exportRange:validBackupRange(video) ? video : null});
     (layout.audioOutputs || []).forEach((entry) => expectedFiles.push({
         kind: "audio", path: entry.mediaPath || entry.currentMediaPath,
         trackNumber: entry.sourceTrackNumber,
-        trackNumbers: entry.sourceTrackNumbers || [entry.sourceTrackNumber]
+        trackNumbers: entry.sourceTrackNumbers || [entry.sourceTrackNumber],
+        exportRange:validBackupRange(entry) ? entry : null
     }));
     return {folderPath, sequenceName: existing.sequenceName, baseName: layout.baseName || existing.baseName,
+        projectPath:existing.projectPath, sequenceID:existing.sequenceID,
+        exportRange:backupLayoutEntries(layout).find(validBackupRange) || null,
         rebackup: true, rebackupLayout: layout, expectedFiles, obsoleteAudioFiles: [],
         backupVideoTrackNumber: layout.video && layout.video.targetTrackNumber || getPositiveIntValue("exportVideoTrackInput", DEFAULT_BACKUP_VIDEO_TRACK)};
 }
@@ -4473,4 +4738,12 @@ document.addEventListener("DOMContentLoaded", () => {
     setStatus("Ready.");
     refreshSuggestedBackupTrack(false);
     refreshExportSelection();
+    let selectionCheckPending = false;
+    setInterval(async () => {
+        if (busy || document.hidden || selectionCheckPending || exportSelectionRefreshPending) return;
+        selectionCheckPending = true;
+        try { await syncExportSelectionWithActiveTimeline(); }
+        catch (error) { /* No active sequence while Premiere changes projects. */ }
+        finally { selectionCheckPending = false; }
+    }, 4000);
 });

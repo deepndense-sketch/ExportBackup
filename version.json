@@ -1,5 +1,5 @@
 {
-  "version": "6.0.0",
+  "version": "6.1.1",
   "channel": "main",
-  "notes": "• Finds existing backups in the selected folder and remembers backup locations per project.\n• Restores previous audio merge groups and adds Select all / Deselect all.\n• Re-backup exports the current In/Out selection to temporary files before replacing old backups.\n• Automatic import uses the Align Existing workflow. File-lock retries release unused references, save once, and wait six seconds; Cancel stops retries.\n• Removes unused duplicate plugin backup items while preserving items used by sequences and unrelated media.\n• Clearer sequence titles, smaller organized dialog details, and fewer repeated refresh checks.\n• Save your project and restart Premiere after updating."
+  "notes": "• Project Collector respects unchecked drives, folders, and files when collecting all sequences.\n• A styled confirmation lists the actual source drives and file counts before copying.\n• Clearer source-selection summary when no sequence is selected.\n• Reopen the panel or restart Premiere after updating."
 }

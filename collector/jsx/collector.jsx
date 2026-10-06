@@ -968,6 +968,19 @@ function getSequenceTrackUsagePlan(filtersJson) {
     }
 }
 
+function getAllSequencesMediaPlan() {
+    try {
+        if (!app.project || !app.project.sequences) throw new Error('Open a project first.');
+        var filters = [], sequences = app.project.sequences;
+        for (var i = 0; i < sequences.numSequences; i++) {
+            var sequence = sequences[i];
+            if (!sequence || !sequence.sequenceID) throw new Error('Could not identify a project sequence.');
+            filters.push('{"sequenceID":"' + pcJsonEscape(sequence.sequenceID) + '","sequenceName":"' + pcJsonEscape(sequence.name) + '","ignoredVideoTracks":[],"ignoredAudioTracks":[]}');
+        }
+        return getSequenceScopedMediaPlan('[' + filters.join(',') + ']');
+    } catch (e) { return pcJsonError(e.toString()); }
+}
+
 function getSequenceScopedMediaPlan(filtersJson) {
     try {
         var filters = pcParseJsonArray(filtersJson);

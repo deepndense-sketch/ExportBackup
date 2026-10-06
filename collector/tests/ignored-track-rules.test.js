@@ -2846,3 +2846,47 @@ test('Premiere host does not relink or save a partially offlined BACKUP project'
     assert.equal(events.includes('close:backup:0:0'), true);
     assert.equal(app.project, originalProject);
 });
+
+for (const accepted of [false, true]) test('empty sequence selection requires confirmation: '+accepted, async () => {
+    const prompts=[];
+    const context=loadCollectorLogic(createTestDocument(), {parent:{showReadablePrompt: options=>{prompts.push(options.message);return Promise.resolve(accepted);}}});
+    vm.runInContext(`
+        selectedSequenceFilters=[];
+        latestPlan={tasks:[{source:'C:/used.mp4',name:'used.mp4',destination:'used.mp4'},{source:'C:/unused.mp4',name:'unused.mp4',destination:'unused.mp4'},{source:'Z:/unchecked.mp4',name:'unchecked.mp4',destination:'unchecked.mp4'}]};
+        sourceTree=[];
+        ensureHostScriptLoaded=async()=>true;
+        loadProjectPlan=async options=>{if(!options.forCollection || !options.keepEmptySequenceSelection) throw Error("Preserve empty selection while refreshing");return true;};
+        getSelectedTasks=()=>latestPlan.tasks.slice(0,2);
+        var allHostCalls=[];
+        callHost=async script=>{allHostCalls.push(script);return JSON.stringify({mediaPaths:['C:/used.mp4','Z:/unchecked.mp4'],includedSequences:[{sequenceID:'one'}],includedSequenceIDs:['one'],missingSequences:[]});};
+    `,context);
+    const result=await context.buildCopyReadyContext();
+    assert.equal(prompts.length,1);
+    assert(prompts[0].includes('Will copy 1 checked file'));
+    assert(prompts[0].includes('C:'));assert(!prompts[0].includes('Z:'));
+    assert.equal(result.ok,accepted);
+    if(accepted) {
+        assert.equal(result.allSequencesMode,true);
+        const tasks=vm.runInContext('latestPlan.tasks',context);
+        assert.equal(context.getCopySkipReason(tasks[0],result.copyRuleContext),'');
+        assert.match(context.getCopySkipReason(tasks[1],result.copyRuleContext),/not used/);
+        assert.match(context.getCopySkipReason(tasks[2],result.copyRuleContext),/Source File List/);
+        assert.deepEqual(Array.from(vm.runInContext('allHostCalls',context)),['getAllSequencesMediaPlan()']);
+    } else assert.equal(vm.runInContext('allHostCalls.length',context),1);
+});
+
+test('whole-project host scope includes all sequences, tracks and nested media only once', () => {
+    const media=name=>({name,getMediaPath:()=>name,isSequence:()=>false});
+    const tracks=items=>{const clips=items.map(projectItem=>({projectItem}));clips.numItems=clips.length;const rows=[{clips}];rows.numTracks=rows.length;return rows;};
+    const nestedItem={name:'Nested',nodeId:'nested-node',isSequence:()=>true};
+    const nested={sequenceID:'nested',name:'Nested',projectItem:nestedItem,videoTracks:tracks([media('nested.png')]),audioTracks:tracks([])};
+    const first={sequenceID:'one',name:'One',videoTracks:tracks([media('shared.mov'),nestedItem]),audioTracks:tracks([media('first.wav')])};
+    const second={sequenceID:'two',name:'Two',videoTracks:tracks([media('shared.mov'),media('second.mov')]),audioTracks:tracks([media('second.wav')])};
+    const sequences=[first,second,nested];sequences.numSequences=sequences.length;
+    const ctx=vm.createContext({app:{project:{sequences}}});
+    vm.runInContext(fs.readFileSync(path.join(__dirname,'../jsx/collector.jsx'),'utf8'),ctx);
+    const plan=JSON.parse(ctx.getAllSequencesMediaPlan());
+    assert.equal(plan.error,undefined);
+    assert.deepEqual(plan.mediaPaths.sort(),['first.wav','nested.png','second.mov','second.wav','shared.mov']);
+    assert.equal(plan.includedSequenceIDs.length,3);
+});

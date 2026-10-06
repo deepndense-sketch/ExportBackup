@@ -1150,7 +1150,9 @@ function updateSelectionSummary() {
 
     const modeSummary = [];
 
-    if (sequenceOnlyMode) {
+    if (sequenceOnlyMode && !selectedSequenceFilters.length) {
+        modeSummary.push("all project sequences; checked source files only");
+    } else if (sequenceOnlyMode) {
         modeSummary.push(`selected sequences only: ${selectedSequenceFilters.map((filter) => filter.sequenceName).join(', ')}`);
     }
 
@@ -2728,7 +2730,7 @@ async function loadProjectPlan(options) {
     if (previousSelections) {
         applyTaskSelectionMap(previousSelections);
     }
-    loadSequenceFilters();
+    if (!(options && options.keepEmptySequenceSelection)) loadSequenceFilters();
     renderSourceTree();
     renderProjectFolderFilters();
     if (categoryDestination || projectRootDestination) {
@@ -3822,7 +3824,36 @@ function validateTrackLockStates(filters) {
     });
 }
 
+function showAllSequencesPrompt(tasks) {
+    const counts = new Map();
+    tasks.forEach(task => {
+        const drive = splitSourcePath(task.source).drive;
+        counts.set(drive, (counts.get(drive) || 0) + 1);
+    });
+    const drives = Array.from(counts.keys()).sort().map(drive => `${drive} — ${counts.get(drive)} file${counts.get(drive) === 1 ? "" : "s"}`);
+    const message = `Will copy ${tasks.length} checked file${tasks.length === 1 ? "" : "s"} used by all project sequences from:\n\n${drives.join('\n')}\n\nOnly checked files and folders are included. Unchecked sources will be skipped.`;
+    if (window.parent && window.parent !== window && typeof window.parent.showReadablePrompt === 'function') {
+        return window.parent.showReadablePrompt({title:'Confirm project backup', message, confirmText:'Copy selected files', cancelText:'Cancel'});
+    }
+    const prompt = document.getElementById('allSequencesPrompt');
+    const yes = document.getElementById('allSequencesAccept');
+    const no = document.getElementById('allSequencesCancel');
+    setText('allSequencesMessage', message);
+    prompt.classList.add('is-visible');
+    return new Promise(resolve => {
+        const finish = accepted => {
+            prompt.classList.remove('is-visible');
+            yes.onclick = null; no.onclick = null; prompt.onkeydown = null;
+            resolve(accepted);
+        };
+        yes.onclick = () => finish(true); no.onclick = () => finish(false);
+        prompt.onkeydown = event => { if (event.key === 'Escape') { event.preventDefault(); finish(false); } };
+        no.focus();
+    });
+}
+
 async function buildCopyReadyContext() {
+    const allSequencesMode = selectedSequenceFilters.length === 0;
     setText('summaryText', 'Reading Premiere project structure...');
 
     const hostLoaded = await ensureHostScriptLoaded();
@@ -3830,11 +3861,47 @@ async function buildCopyReadyContext() {
         return { ok: false };
     }
 
-    if (!latestPlan || !sourceTree) {
-        const planLoaded = await loadProjectPlan({forCollection: true});
+    if (allSequencesMode || !latestPlan || !sourceTree) {
+        const planLoaded = await loadProjectPlan({forCollection: true, keepEmptySequenceSelection: allSequencesMode});
         if (!planLoaded || !latestPlan) {
             return { ok: false };
         }
+    }
+
+    if (allSequencesMode) {
+        setText('summaryText', 'Finding files used by all project sequences...');
+        const scopedPlan = safeJsonParse(await callHost('getAllSequencesMediaPlan()'));
+        if (!scopedPlan || scopedPlan.error || !Array.isArray(scopedPlan.mediaPaths)) {
+            throw new Error(scopedPlan && scopedPlan.error || 'Could not inspect all project sequences.');
+        }
+        if ((scopedPlan.missingSequences || []).length) throw new Error('Some project sequences could not be inspected. Refresh the project and try again.');
+        if (!(scopedPlan.includedSequenceIDs || []).length) {
+            showCollectorMessage('This project has no sequences to collect.');
+            return { ok: false };
+        }
+        const mediaSet = new Set(scopedPlan.mediaPaths.map(normalizeMediaKey));
+        const tasks = latestPlan.tasks || [];
+        const selectedTasks = getSelectedTasks();
+        const copyTasks = selectedTasks.filter(task => mediaSet.has(normalizeMediaKey(task.source)));
+        if (!copyTasks.length) {
+            showCollectorMessage('No files used by project sequences are checked in Source File List. Select a drive or folder to copy.');
+            return { ok: false };
+        }
+        if (!await showAllSequencesPrompt(copyTasks)) {
+            setText('summaryText', 'Backup cancelled before any files were copied.');
+            return { ok: false };
+        }
+        return {
+            ok: true,
+            allSequencesMode: true,
+            copyRuleContext: createCopyRuleContext({
+                treeSelectedTaskSet: new Set(selectedTasks),
+                sequenceScopedMediaSet: mediaSet,
+                trackRuleContext: buildTrackRuleContext(tasks, mediaSet, new Set()),
+                includedProjectFolders: [], ignoredProjectFolders: []
+            }),
+            copyWarnings: [], sequenceScopeInfo: scopedPlan, trackConflicts: []
+        };
     }
 
     const trackRefresh = await refreshAllSelectedSequenceTracks(false);
@@ -4026,7 +4093,7 @@ async function runCollection() {
     };
     const total = plan.tasks.length;
 
-    const willCreateReducedProject = sequenceOnlyMode && createReducedProject && sequenceScopeInfo && Array.isArray(sequenceScopeInfo.includedSequenceIDs) && sequenceScopeInfo.includedSequenceIDs.length;
+    const willCreateReducedProject = !context.allSequencesMode && sequenceOnlyMode && createReducedProject && sequenceScopeInfo && Array.isArray(sequenceScopeInfo.includedSequenceIDs) && sequenceScopeInfo.includedSequenceIDs.length;
     if (total > 0 || copyProjectFile || willCreateReducedProject) {
         try {
             ensureDirectorySync(plan.rootPath);
@@ -4054,7 +4121,9 @@ async function runCollection() {
         skippedItems.push(`${item.task.source} -> skipped because it already exists in compare location: ${item.match.path}`);
     });
 
-    if (sequenceOnlyMode && sequenceScopeInfo) {
+    if (context.allSequencesMode) {
+        setText('summaryText', `Copying media used by all ${sequenceScopeInfo.includedSequences.length} project sequences into ${plan.rootPath}`);
+    } else if (sequenceOnlyMode && sequenceScopeInfo) {
         setText('summaryText', `Windows robocopy mode active. Copying only media used by ${sequenceScopeInfo.includedSequences.length} chosen/nested sequences into ${plan.rootPath}`);
     } else {
         setText('summaryText', `Windows robocopy mode active. Copying into ${plan.rootPath}`);

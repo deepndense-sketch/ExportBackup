@@ -322,9 +322,18 @@ function setUpdateButton(label, isUpdateAvailable, hoverText) {
 
 let promptedUpdateVersion = '';
 let updatePromptPreviousFocus = null;
+let updateInProgress = false;
+
+function showUpdateProgress(message) {
+    updateInProgress = !!message;
+    const prompt = document.getElementById('updateProgressPrompt');
+    if (!prompt) return;
+    document.getElementById('updateProgressMessage').textContent = message || '';
+    prompt.classList.toggle('is-hidden', !updateInProgress);
+}
 
 function isUpdateWorkBusy() {
-    if (busy) return true;
+    if (busy || updateInProgress) return true;
     const collector = document.getElementById('collectorPanel');
     try { return !!(collector && collector.contentWindow && collector.contentWindow.isCollectorBusy && collector.contentWindow.isCollectorBusy()); }
     catch (error) { return true; }
@@ -901,7 +910,7 @@ async function refreshAutoEmptyTrackPreview() {
         preview.textContent = result && result.ok
             ? `→ V${result.trackNumber}${result.createTrack ? ' (new track)' : ''}`
             : ((result && result.message) || 'Refresh to check track');
-        preview.title = 'For the marked range. Checked again before exporting. Re-backup keeps its recorded track.';
+        preview.title = 'Empty across the whole track. Checked again before exporting. Re-backup keeps its recorded track.';
     } catch (error) {
         if (request === autoEmptyTrackPreviewRequest) preview.textContent = 'Refresh to check track';
     } finally {
@@ -1245,11 +1254,12 @@ async function monitorUpdaterCompletion() {
                 const parsed = readJsonFile(resultPath);
                 // The writer may still be completing the file. Retry incomplete results.
                 if (!parsed || typeof parsed.ok !== 'boolean') continue;
+                showUpdateProgress('');
                 if (parsed.ok) {
                     readVersionInfo(true);
                     const message = `Installed version: ${localVersion}\n\nSave your project and restart Premiere Pro to use the new version.`;
-                    setStatus(`Update complete.\n${message}`, 'success');
-                    await showReadablePrompt({title:'Update complete', message, kind:'success', showDetails:true, confirmText:'OK'});
+                    setStatus(`Update finished.\n${message}`, 'success');
+                    await showReadablePrompt({title:'Update finished', message, kind:'success', showDetails:true, confirmText:'OK'});
                     return;
                 }
 
@@ -1258,6 +1268,7 @@ async function monitorUpdaterCompletion() {
                 await showReadablePrompt({title:'Update failed', message, kind:'error'});
                 return;
             } catch (error) {
+                showUpdateProgress('');
                 setStatus(`Updater finished, but the result file could not be read.\n${error.message}`);
                 return;
             }
@@ -1267,6 +1278,7 @@ async function monitorUpdaterCompletion() {
     }
 
     const message = `Update completion could not be confirmed.\nCheck the updater log before trying again.\nLog: ${getTempUpdaterLogPath()}`;
+    showUpdateProgress('');
     setStatus(message, 'warning');
     await showReadablePrompt({title:'Update status unavailable', message, kind:'warning'});
 }
@@ -1302,6 +1314,7 @@ function runGithubUpdate() {
     const remoteZipUrl = "https://github.com/deepndense-sketch/ExportBackup/archive/refs/heads/main.zip";
 
     setStatus("Updating… Downloading the new version.");
+    showUpdateProgress('Downloading the new version…');
 
     try {
         fs.copyFileSync(updateScriptPath, tempUpdaterScriptPath);
@@ -1315,6 +1328,7 @@ function runGithubUpdate() {
             fs.unlinkSync(tempUpdaterLogPath);
         }
     } catch (error) {
+        showUpdateProgress('');
         setStatus(`Could not prepare updater.\n${error.message}`);
         return;
     }
@@ -1322,6 +1336,7 @@ function runGithubUpdate() {
     downloadFile(remoteZipUrl, tempUpdaterZipPath)
         .then(() => {
             setStatus("Updating… Accept the Windows permission prompt if it appears.");
+            showUpdateProgress('Accept the Windows permission prompt if it appears.');
 
             const command = buildUpdaterLaunchCommand(tempUpdaterScriptPath, tempUpdaterZipPath,
                 getUserCepExtensionPath(), tempUpdaterResultPath, tempUpdaterLogPath);
@@ -1332,6 +1347,7 @@ function runGithubUpdate() {
                 {windowsHide:true},
                 (error) => {
                     if (error) {
+                        showUpdateProgress('');
                         const message = `Could not launch updater.\n${error.message}`;
                         setStatus(message, 'error');
                         showReadablePrompt({title:'Update failed', message, kind:'error'});
@@ -1339,11 +1355,13 @@ function runGithubUpdate() {
                     }
 
                     setStatus("Updating… Installing the new version. Please wait.");
+                    showUpdateProgress('Installing the new version…');
                     monitorUpdaterCompletion();
                 }
             );
         })
         .catch((error) => {
+            showUpdateProgress('');
             const message = `Could not prepare updater.\n${error.message}`;
             setStatus(message, 'error');
             showReadablePrompt({title:'Update failed', message, kind:'error'});
@@ -2123,6 +2141,7 @@ async function refreshExportSelection() {
 
     exportSelectionRefreshPending = true;
     try {
+        await refreshAutoEmptyTrackPreview();
         renderExportSelectionList({ ok: true, items: [], message: "Reading active sequence tracks..." });
         const selectionInfo = await getExportSelectionInfo();
         if (selectionInfo && selectionInfo.ok) {
@@ -2130,7 +2149,6 @@ async function refreshExportSelection() {
             await loadExistingBackupGroups(selectionInfo);
         }
         renderExportSelectionList(selectionInfo);
-        await refreshAutoEmptyTrackPreview();
     } finally {
         exportSelectionRefreshPending = false;
     }
@@ -3137,40 +3155,9 @@ async function prepareAlignExistingCleanup(matchInfo) {
             stalePaths.push(obsoletePath);
         }
     });
-    const expectedFiles = [];
-
-    if (matchInfo && matchInfo.videoPath) {
-        expectedFiles.push({
-            kind: "video",
-            path: matchInfo.videoPath,
-            finalPath: matchInfo.videoPath
-        });
-    }
-
-    (matchInfo && Array.isArray(matchInfo.audio) ? matchInfo.audio : []).forEach((entry) => {
-        expectedFiles.push({
-            kind: "audio",
-            path: entry.path,
-            finalPath: entry.path,
-            oldFinalPath: "",
-            trackNumber: entry.trackNumber,
-            trackNumbers: entry.trackNumbers,
-            name: entry.name
-        });
-    });
-
-    stalePaths.forEach((stalePath) => {
-        expectedFiles.push({
-            kind: "audio",
-            path: stalePath,
-            finalPath: stalePath,
-            oldFinalPath: stalePath
-        });
-    });
-
-    if (expectedFiles.length) {
-        await prepareRebackupReplacement({ expectedFiles });
-    }
+    // Ordinary alignment does not replace files on disk. Keep timeline clips
+    // until the host has read their placement and checked every destination.
+    // Re-backup file replacement has its own release step above this flow.
 
     return { stalePaths };
 }
@@ -3714,10 +3701,23 @@ async function renameLegacyBackupFilesForSequence(folderPath, sequenceName) {
 
     const completed = [];
     try {
-        operations.forEach((operation) => {
-            fs.renameSync(operation.sourcePath, operation.targetPath);
+        for (const operation of operations) {
+            await runLocalFileStepWithRetry(
+                'Renaming backup to match the sequence',
+                `Old name: ${path.basename(operation.sourcePath)}\nNew name: ${path.basename(operation.targetPath)}`,
+                async () => {
+                    if (fileExists(operation.targetPath)) throw new Error('The corrected backup filename already exists. Both files were kept.');
+                    fs.renameSync(operation.sourcePath, operation.targetPath);
+                },
+                () => fileExists(operation.targetPath) && !fileExists(operation.sourcePath),
+                async () => {
+                    const retryPaths = JSON.stringify([operation.sourcePath, operation.targetPath]);
+                    const retryResult = parseHostResult(await callHost(`exportBackup.prepareImportRetry("${escapeForEvalScript(result.projectPath || '')}","${escapeForEvalScript(retryPaths)}")`));
+                    if (!retryResult || retryResult.ok === false) throw new Error(retryResult && retryResult.message || 'Could not release unused backup references before renaming.');
+                }
+            );
             completed.push(operation);
-        });
+        }
     } catch (error) {
         completed.reverse().forEach((operation) => {
             try {
@@ -3743,6 +3743,7 @@ async function renameLegacyBackupFilesForSequence(folderPath, sequenceName) {
                 `"${escapeForEvalScript(JSON.stringify(legacyLayout))}")`;
             await callHost(restoreScript);
         } catch (restoreError) {}
+        if (error.code === 'IMPORT_CANCELLED') throw error;
         throw new Error(`Could not rename all matching backup files. Completed renames were rolled back.\n${error.message}`);
     }
 
@@ -3915,6 +3916,11 @@ async function runAlignmentFlow(folderPath, options) {
         }
 
         let manifest = settings.manifest || readManifestForSequence(folderPath, activeSequenceName);
+        if (manifest && legacyRenameLayout) {
+            manifest.rebackup = true;
+            manifest.rebackupLayout = mergeExistingAlignmentLayouts(manifest.rebackupLayout, legacyRenameLayout);
+            if (manifest.rebackupLayout.video) manifest.backupVideoTrackNumber = manifest.rebackupLayout.video.targetTrackNumber;
+        }
         if (!manifest && legacyRenameLayout) {
             manifest = {
                 rebackup: true,
@@ -3986,7 +3992,7 @@ async function runAlignmentFlow(folderPath, options) {
         const ownersJson = JSON.stringify(getBackupClipOwners());
         const videoEntry = matchInfo.manifest && (matchInfo.manifest.expectedFiles || []).find(entry => entry.kind === 'video');
         const exportRangeJson = JSON.stringify(videoEntry && videoEntry.exportRange || matchInfo.manifest && matchInfo.manifest.exportRange || null);
-        const script = `exportBackup.alignMappedFiles("${escapeForEvalScript(resolvedVideoPath)}","${escapeForEvalScript(audioJson)}",${backupVideoTrackNumber},${sortProjectFiles},"${escapeForEvalScript(rebackupLayoutJson)}","${escapeForEvalScript(ownersJson)}","${escapeForEvalScript(exportRangeJson)}")`;
+        const script = `exportBackup.alignMappedFiles("${escapeForEvalScript(resolvedVideoPath)}","${escapeForEvalScript(audioJson)}",${backupVideoTrackNumber},${sortProjectFiles},"${escapeForEvalScript(rebackupLayoutJson)}","${escapeForEvalScript(ownersJson)}","${escapeForEvalScript(exportRangeJson)}",${useAutoEmptyBackupTrack() ? 'true' : 'false'})`;
         const result = await callHost(script);
         const parsed = parseHostResult(result);
 
@@ -4686,10 +4692,25 @@ async function alignExistingFolder() {
     }
     await runAlignmentFlow(exportFolder || alignFolder, {
         manifest,
-        manifestOnly: true,
+        // Recovery must stay restricted to its completed export journal.
+        // Normal manual alignment also discovers renamed timeline backups.
+        manifestOnly: !!(manifest.rebackupPrepared && (manifest.temporaryExport || getManifestPreservedPaths(manifest).length)),
         skipVideo: false,
         autoTriggered: false
     });
+}
+
+function mergeExistingAlignmentLayouts(current, legacy) {
+    const merged = Object.assign({}, current || {}, legacy || {});
+    merged.video = legacy && legacy.video || current && current.video || null;
+    merged.backupAudio = legacy && legacy.backupAudio || current && current.backupAudio || null;
+    const outputs = new Map();
+    [...(current && current.audioOutputs || []), ...(legacy && legacy.audioOutputs || [])].forEach(entry => {
+        const key = (entry.sourceTrackNumbers || [entry.sourceTrackNumber]).join('-');
+        outputs.set(key, entry);
+    });
+    merged.audioOutputs = Array.from(outputs.values());
+    return merged;
 }
 
 function createExistingBackupAlignmentManifest(existing, folderPath) {

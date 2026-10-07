@@ -1012,6 +1012,14 @@ body[data-active-tool="export"] { background: #1c1c1d; }
     </section>
 </div>
 
+<div id="updateProgressPrompt" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="updateProgressTitle">
+    <div class="dialog-panel update-dialog stack">
+        <h2 id="updateProgressTitle">Updating, please wait…</h2>
+        <p id="updateProgressMessage" class="dialog-copy" role="status" aria-live="polite"></p>
+        <p class="dialog-copy">Please keep this panel open until the update finishes.</p>
+    </div>
+</div>
+
 <div id="updatePrompt" class="dialog-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="updatePromptTitle" aria-describedby="updatePromptCopy" onkeydown="handleUpdatePromptKey(event)">
     <div class="dialog-panel update-dialog stack">
         <h2 id="updatePromptTitle">Backup Project update available</h2>

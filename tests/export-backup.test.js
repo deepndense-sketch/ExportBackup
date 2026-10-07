@@ -576,21 +576,23 @@ test('updater reads PowerShell BOM JSON and retries incomplete results without f
     let contents='\uFEFF{"ok":true,"message":"Update completed successfully."}';
     const messages=[];
     const dialogs=[];
+    const progress=[];
     const context=vm.createContext({fs:{readFileSync:()=>contents},getTempUpdaterResultPath:()=>'/result.json',
         getTempUpdaterLogPath:()=>'/update.log',fileExists:()=>true,delay:async()=>{},
-        readVersionInfo(){},checkForUpdates:async()=>{},localVersion:'5.0.2',setStatus:m=>messages.push(m),showReadablePrompt:async options=>dialogs.push(options)});
+        showUpdateProgress:m=>progress.push(m),readVersionInfo(){},checkForUpdates:async()=>{},localVersion:'5.0.2',setStatus:m=>messages.push(m),showReadablePrompt:async options=>dialogs.push(options)});
     vm.runInContext(source.slice(source.indexOf('function readJsonFile('),source.indexOf('function getPositiveIntValue(')),context);
     vm.runInContext(source.slice(source.indexOf('async function monitorUpdaterCompletion('),source.indexOf('function buildUpdaterLaunchCommand(')),context);
     assert.equal(context.readJsonFile('/result.json').ok,true);
     await context.monitorUpdaterCompletion();
-    assert.match(messages.pop(),/Update complete/);
+    assert.match(messages.pop(),/Update finished/);
+    assert.equal(progress.pop(),'','progress notice closes on verified completion');
     assert.equal(dialogs[0].kind,'success');
     assert.equal(dialogs[0].showDetails,true);
     assert.match(dialogs[0].message,/restart Premiere Pro/);
     let attempts=0;
     context.delay=async()=>{contents=++attempts===1 ? '{"ok":' : '\uFEFF{"ok":true}';};
     await context.monitorUpdaterCompletion();
-    assert.equal(attempts,2);assert.match(messages.pop(),/Update complete/);
+    assert.equal(attempts,2);assert.match(messages.pop(),/Update finished/);
     context.delay=async()=>{};contents='\uFEFF{"ok":false,"message":"Access denied"}';
     await context.monitorUpdaterCompletion();
     assert.match(messages.pop(),/Updater failed\.\nAccess denied/);
@@ -624,7 +626,7 @@ test('selection excludes disabled-only audio in range and restores it when enabl
         'disabled clips still occupy their timeline space and cannot be overwritten');
 });
 
-test('empty-track preview reports the range-free track or proposed new track without creating it', () => {
+test('empty-track preview reports a wholly empty track independently of In/Out marks', () => {
     const {context}=loadHostLogic();
     const sequence=makeTimedSequence([],[makeTrack(0,[makeTimedClip('Source.mp4',60)]),makeTrack(0)],'Show');
     context.app.project.activeSequence=sequence;
@@ -634,7 +636,16 @@ test('empty-track preview reports the range-free track or proposed new track wit
     const result=JSON.parse(context.exportBackup.getEmptyTrackPreview());
     assert.equal(result.trackNumber,3);assert.equal(result.createTrack,true);
     sequence.getInPoint=()=>60;sequence.getOutPoint=()=>90;
-    assert.equal(JSON.parse(context.exportBackup.getEmptyTrackPreview()).trackNumber,1);
+    assert.equal(JSON.parse(context.exportBackup.getEmptyTrackPreview()).trackNumber,3);
+    sequence.getInPoint=()=>assert.fail('preview must not read In');
+    sequence.getOutPoint=()=>assert.fail('preview must not read Out');
+    assert.equal(JSON.parse(context.exportBackup.getEmptyTrackPreview()).trackNumber,3);
+    sequence.getInPoint=()=>-1;sequence.getOutPoint=()=>-1;
+    const unmarked=JSON.parse(context.exportBackup.getEmptyTrackPreview());
+    assert.equal(unmarked.ok,true,'preview must not require export marks');
+    assert.equal(unmarked.trackNumber,3,'without marks, occupied tracks remain protected across the timeline');
+    sequence.videoTracks[1]=makeTrack(0);
+    assert.equal(JSON.parse(context.exportBackup.getEmptyTrackPreview()).trackNumber,2);
 });
 
 test('backup imports into lower video/audio tracks that are empty only within its saved range', () => {
@@ -666,6 +677,115 @@ test('backup imports into lower video/audio tracks that are empty only within it
     assert.deepEqual(writes,[['video',1,1,120],['audio',2,120]]);
     assert.equal(audio[1].clips.numItems,2);
     assert.equal(audio[2].clips[0],earlierAudio);
+});
+
+test('Align Existing preserves MP4 audio on A3 independently of video on V6 and stale saved layout', () => {
+    for (const savedAudioTrack of [0,6]) {
+        const {context}=loadHostLogic();
+        const backupPath='D:/Show_BACKUP.mp4';
+        const old=makeTimedClip('Show_BACKUP.mp4',60,backupPath);
+        const audio=[makeTrack(0),makeTrack(0),makeTrack(0,[old]),makeTrack(0),makeTrack(0),makeTrack(0)];
+        old.remove=()=>{audio[2].clips=[];audio[2].clips.numItems=0;};
+        const sequence=makeTimedSequence(audio,Array.from({length:6},()=>makeTrack(0)),'Show');
+        context.app.project.activeSequence=sequence;
+        context.ebGetImportBin=()=>({name:'BACKUP'});
+        context.ebImportProjectItem=()=>({getOutPoint:()=>({seconds:60})});
+        context.ebRemoveUnusedMedia=()=>false;
+        const writes=[];
+        sequence.overwriteClip=(item,time,v,a)=>writes.push([v,a]);
+        const range={startSeconds:0,endSeconds:60};
+        const layout=savedAudioTrack ? {video:{...range,targetTrackNumber:6},backupAudio:{...range,targetTrackNumber:savedAudioTrack},audioOutputs:[]} : null;
+        const result=JSON.parse(context.exportBackup.alignMappedFiles(backupPath,'[]',6,false,JSON.stringify(layout),'{}',JSON.stringify(range)));
+        assert.equal(result.ok,true,result.message);
+        assert.deepEqual(writes,[[5,2]],'video V6 must preserve actual MP4 audio A3');
+    }
+});
+
+test('Align Existing keeps live video and separate WAV placements before replacing clips', () => {
+    const {context}=loadHostLogic();
+    const videoPath='D:/Show_BACKUP.mp4', wavPath='D:/Show_Track1.wav';
+    const videoClip=makeTimedClip('Show_BACKUP.mp4',60,videoPath);
+    const mp4Audio=makeTimedClip('Show_BACKUP.mp4',60,videoPath);
+    const wavClip=makeTimedClip('Show_Track1.wav',60,wavPath);
+    const video=Array.from({length:6},()=>makeTrack(0));video[4]=makeTrack(0,[videoClip]);
+    const audio=[makeTrack(0),makeTrack(0),makeTrack(0,[mp4Audio]),makeTrack(0,[wavClip]),makeTrack(0),makeTrack(0)];
+    for (const [track,clip] of [[video[4],videoClip],[audio[2],mp4Audio],[audio[3],wavClip]]) {
+        clip.remove=()=>{track.clips=[];track.clips.numItems=0;};
+    }
+    const sequence=makeTimedSequence(audio,video,'Show');context.app.project.activeSequence=sequence;
+    context.ebGetImportBin=()=>({name:'BACKUP'});
+    context.ebImportProjectItem=()=>({getOutPoint:()=>({seconds:60})});
+    context.ebRemoveUnusedMedia=()=>false;
+    const writes=[];
+    sequence.overwriteClip=(item,time,v,a)=>writes.push(['mp4',v,a,time]);
+    audio[3].overwriteClip=(item,time)=>writes.push(['wav',3,time.seconds]);
+    const range={startSeconds:0,endSeconds:60};
+    const result=JSON.parse(context.exportBackup.alignMappedFiles(videoPath,JSON.stringify([{path:wavPath,trackNumber:1}]),6,false,'null','{}',JSON.stringify(range)));
+    assert.equal(result.ok,true,result.message);
+    assert.deepEqual(writes,[['mp4',4,2,0],['wav',3,0]]);
+});
+
+test('fresh alignment uses first available audio tracks in order independently of V6', () => {
+    const {context}=loadHostLogic();
+    const audio=[makeTrack(0,[makeTimedClip('Source1.wav',60)]),makeTrack(0,[makeTimedClip('Source2.wav',60)]),makeTrack(0),makeTrack(0),makeTrack(0)];
+    const sequence=makeTimedSequence(audio,Array.from({length:6},()=>makeTrack(0)),'Show');
+    context.app.project.activeSequence=sequence;
+    context.ebGetImportBin=()=>({name:'BACKUP'});
+    context.ebImportProjectItem=()=>({getOutPoint:()=>({seconds:60})});
+    context.ebRemoveUnusedMedia=()=>false;
+    const writes=[];
+    sequence.overwriteClip=(item,time,v,a)=>writes.push(['mp4',v,a]);
+    audio.forEach((track,i)=>track.overwriteClip=()=>writes.push(['wav',i]));
+    const entries=[{path:'D:/Show_Track1.wav',trackNumber:1},{path:'D:/Show_Track2.wav',trackNumber:2}];
+    const result=JSON.parse(context.exportBackup.alignMappedFiles('D:/Show_BACKUP.mp4',JSON.stringify(entries),6,false,'null','{}',JSON.stringify({startSeconds:0,endSeconds:60})));
+    assert.equal(result.ok,true,result.message);
+    assert.deepEqual(writes,[['mp4',5,2],['wav',3],['wav',4]]);
+});
+
+test('Align Existing replaces the same backup at its actual placement despite a longer old timeline end', () => {
+    const {context}=loadHostLogic();
+    const mediaPath='D:/Show_BACKUP.mp4';
+    const oldVideo=makeTimedClip('Show_BACKUP.mp4',90,mediaPath);
+    const oldAudio=makeTimedClip('Show_BACKUP.mp4',90,mediaPath);
+    const video=Array.from({length:6},()=>makeTrack(0));video[5]=makeTrack(0,[oldVideo]);
+    const audio=[makeTrack(0),makeTrack(0),makeTrack(0,[oldAudio])];
+    for(const [track,clip] of [[video[5],oldVideo],[audio[2],oldAudio]]) {
+        clip.remove=()=>{track.clips=[];track.clips.numItems=0;};
+    }
+    const sequence=makeTimedSequence(audio,video,'Show');context.app.project.activeSequence=sequence;
+    context.ebGetImportBin=()=>({name:'BACKUP'});
+    context.ebImportProjectItem=()=>({getOutPoint:()=>({seconds:89.9})});
+    context.ebRemoveUnusedMedia=()=>false;
+    const writes=[];sequence.overwriteClip=(item,time,v,a)=>writes.push([v,a,time]);
+    const result=JSON.parse(context.exportBackup.alignMappedFiles(mediaPath,'[]',5,false,'null','{}',JSON.stringify({startSeconds:0,endSeconds:89.9})));
+    assert.equal(result.ok,true,result.message);
+    assert.deepEqual(writes,[[5,2,0]],'actual V6/A3 placement wins over selected V5 and old end');
+    const elsewhere=makeTimedClip('Show_BACKUP.mp4',100,mediaPath);elsewhere.start.seconds=10;
+    assert.equal(context.ebIsRangeReplacement(elsewhere,{startSeconds:0,endSeconds:89.9},[mediaPath]),false);
+    const unrelated=makeTimedClip('Other.mp4',90,'D:/Other.mp4');
+    assert.equal(context.ebTrackOccupiedInRange(makeTrack(0,[unrelated]),{startSeconds:0,endSeconds:89.9},[mediaPath]),true);
+});
+
+test('Align Existing prioritizes current placement, then enabled empty track, then manual selection', () => {
+    for (const mode of ['existing','empty','manual']) {
+        const {context}=loadHostLogic();
+        const mediaPath='D:/Show_BACKUP.mp4';
+        const video=Array.from({length:10},(_,i)=>makeTrack(0,i<7 ? [makeTimedClip('Source'+i+'.mp4',60,'D:/Source'+i+'.mp4')] : []));
+        const audio=[makeTrack(0,[makeTimedClip('Source.wav',60)]),makeTrack(0,[makeTimedClip('Music.wav',60)]),makeTrack(0)];
+        if(mode==='existing') {
+            const old=makeTimedClip('Show_BACKUP.mp4',60,mediaPath);video[5]=makeTrack(0,[old]);
+            old.remove=()=>{video[5].clips=[];video[5].clips.numItems=0;};
+        }
+        const sequence=makeTimedSequence(audio,video,'Show');context.app.project.activeSequence=sequence;
+        context.ebGetImportBin=()=>({name:'BACKUP'});
+        context.ebImportProjectItem=()=>({getOutPoint:()=>({seconds:60})});
+        context.ebRemoveUnusedMedia=()=>false;
+        const writes=[];sequence.overwriteClip=(item,time,v,a)=>writes.push([v,a]);
+        const manual=mode==='empty' ? 6 : 9;
+        const result=JSON.parse(context.exportBackup.alignMappedFiles(mediaPath,'[]',manual,false,'null','{}',JSON.stringify({startSeconds:0,endSeconds:60}),mode!=='manual'));
+        assert.equal(result.ok,true,result.message);
+        assert.deepEqual(writes,[[mode==='existing'?5:mode==='empty'?7:8,2]]);
+    }
 });
 
 test('recorded alignment refuses overlapping source media before removing existing backups', () => {
@@ -1348,15 +1468,30 @@ test('Align Existing bypasses destination naming and passes discovered paths to 
         stopPendingCleanupRetry:async () => {}, resolveExportActionDestination:async (flag) => {assert.equal(flag,true); return {folderPath:'D:/',existingBackup:existing};},
         resolveProjectBackupFolder:() => {throw new Error('FTP validation must not run');},
         readManifestForSequence:() => null, getPositiveIntValue:() => 5, updateAlignFolder() {},
-        confirmDiscoveredBackupRange:async()=>true,validBackupRange:()=>false,
+        confirmDiscoveredBackupRange:async()=>true,validBackupRange:()=>false,getManifestPreservedPaths:()=>[],
         backupLayoutEntries:layout=>[layout.video,layout.backupAudio].concat(layout.audioOutputs||[]).filter(Boolean),
         document:{getElementById:() => ({})},alert:message => assert.fail(message),setStatus() {},
         runAlignmentFlow:async (folder,options) => {aligned={folder,options};}});
     vm.runInContext(source.slice(source.indexOf('async function alignExistingFolder()'),source.indexOf('document.addEventListener("DOMContentLoaded"')),context);
     await context.alignExistingFolder();
     assert.equal(aligned.folder,'D:/');
-    assert.equal(aligned.options.manifestOnly,true);
+    assert.equal(aligned.options.manifestOnly,false,'normal Align Existing must detect renamed timeline files');
     assert.deepEqual(Array.from(aligned.options.manifest.expectedFiles,entry => entry.path),['D:/Old_BACKUP.mp4','E:/Old_Track1.wav']);
+    existing.savedManifests=[{rebackupPrepared:true,temporaryExport:true,expectedFiles:[]}];
+    await context.alignExistingFolder();
+    assert.equal(aligned.options.manifestOnly,true,'temporary export recovery stays restricted to its journal');
+});
+
+test('alignment merges renamed MP4 and Track2 placement with current-name Track1', () => {
+    const source=fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
+    const context=vm.createContext({});
+    vm.runInContext(source.slice(source.indexOf('function mergeExistingAlignmentLayouts('),source.indexOf('function createExistingBackupAlignmentManifest(')),context);
+    const current={video:null,backupAudio:null,audioOutputs:[{sourceTrackNumber:1,sourceTrackNumbers:[1],targetTrackNumber:4}]};
+    const legacy={video:{targetTrackNumber:6},backupAudio:{targetTrackNumber:3},audioOutputs:[{sourceTrackNumber:2,sourceTrackNumbers:[2],targetTrackNumber:5}]};
+    const merged=context.mergeExistingAlignmentLayouts(current,legacy);
+    assert.equal(merged.video.targetTrackNumber,6);
+    assert.equal(merged.backupAudio.targetTrackNumber,3);
+    assert.deepEqual(Array.from(merged.audioOutputs,e=>e.targetTrackNumber),[4,5]);
 });
 
 test('URI-encoded Premiere filenames reuse V7 and recognize MP4 audio-only backups', () => {
@@ -2812,10 +2947,10 @@ test('automatic alignment uses only files selected for the current export', () =
     assert.match(scannerSource, /if \(!manifestOnly\) \{\s*files\.forEach/);
     assert.match(recoverySource, /const manifestOnly = settings\.manifestOnly === true && !!manifest/);
     assert.match(recoverySource, /if \(!manifestOnly\) \{\s*fs\.readdirSync/);
-    assert.equal(automaticAlignmentCount, 3);
+    assert.equal(automaticAlignmentCount, 2);
     assert.match(
         mainSource,
-        /async function alignExistingFolder\(\)[\s\S]*?runAlignmentFlow\(exportFolder \|\| alignFolder, \{\s*manifest,\s*manifestOnly: true,\s*skipVideo: false,\s*autoTriggered: false/
+        /async function alignExistingFolder\(\)[\s\S]*?manifestOnly: !!\(manifest\.rebackupPrepared/
     );
 });
 
@@ -3422,6 +3557,87 @@ test('Re-backup compacts an unchanged audio mapping when an old backup layer has
     assert.equal(rebuilt.audioLayoutRebuilt, true);
     assert.equal(rebuilt.backupAudio.targetTrackNumber, 6);
     assert.deepEqual(rebuilt.audioOutputs, []);
+});
+
+for (const cancel of [false,true]) test(`legacy backup rename waits for file locks and preserves cancellation: ${cancel}`, async () => {
+    const source=fs.readFileSync(path.join(__dirname,'..','js','main.js'),'utf8');
+    const folder=path.resolve('Backups');
+    const oldPath=path.join(folder,'Old Show_BACKUP.mp4'),newPath=path.join(folder,'New Show_BACKUP.mp4');
+    const files=new Set([oldPath]);
+    let renameAttempts=0,releases=0,preparations=0,restorations=0;
+    const context=vm.createContext({path,DEFAULT_BACKUP_VIDEO_TRACK:5,
+        sanitizeSequenceName:value=>value,escapeForEvalScript:value=>value,
+        getPositiveIntValue:()=>6,getPathComparisonKey:value=>value.toLowerCase(),fileExists:value=>files.has(value),
+        parseHostResult:JSON.parse,
+        fs:{renameSync(from,to){
+            if (++renameAttempts===1) {const error=new Error('locked');error.code='EBUSY';throw error;}
+            files.delete(from);files.add(to);
+        }},
+        prepareRebackupReplacement:async()=>{preparations++;},
+        callHost:async script=>{
+            if(script.includes('findLegacyBackupForActiveSequence')) return JSON.stringify({ok:true,found:true,projectPath:'D:/Project.prproj',candidate:{files:[{kind:'video',path:oldPath}],layout:{video:{targetTrackNumber:6},backupAudio:{targetTrackNumber:3},audioOutputs:[]}}});
+            if(script.includes('prepareImportRetry')) {releases++;assert.match(script,/Project.prproj/);return JSON.stringify({ok:true});}
+            if(script.includes('alignMappedFiles')) {restorations++;return JSON.stringify({ok:true});}
+            assert.fail(script);
+        },
+        runLocalFileStepWithRetry:async(title,details,action,verify,beforeRetry)=>{
+            try {await action();assert.fail('first rename should be locked');}
+            catch(error){assert.equal(error.code,'EBUSY');}
+            await beforeRetry();
+            if(cancel){const error=new Error('cancelled');error.code='IMPORT_CANCELLED';throw error;}
+            await action();assert.equal(verify(),true);
+        }});
+    vm.runInContext(source.slice(source.indexOf('async function renameLegacyBackupFilesForSequence('),source.indexOf('async function copyExistingBackupsToResolvedLocation(')),context);
+    if(cancel){
+        await assert.rejects(context.renameLegacyBackupFilesForSequence(folder,'New Show'),{code:'IMPORT_CANCELLED'});
+        assert.equal(files.has(oldPath),true);assert.equal(restorations,1);
+    }else{
+        const result=await context.renameLegacyBackupFilesForSequence(folder,'New Show');
+        assert.equal(result.renamedCount,1);assert.equal(files.has(newPath),true);
+    }
+    assert.equal(preparations,1,'timeline removal must not repeat during file-lock retries');
+    assert.equal(releases,1);
+});
+
+test('track list excludes mixed-name timeline backups and restores previous merge groups', () => {
+    const {context}=loadHostLogic();
+    const oldBase='Previous Show',currentBase='Renamed Show';
+    const clip=(base,suffix)=>makeTimedClip(base+suffix,60,'D:/Backups/'+base+suffix);
+    const audio=[makeTrack(0,[makeTimedClip('Source1.wav',60)]),makeTrack(0,[makeTimedClip('Source2.wav',60)]),
+        makeTrack(0,[makeTimedClip('Source3.wav',60)]),makeTrack(0,[clip(oldBase,'_BACKUP.mp4')]),
+        makeTrack(0,[clip(currentBase,'_Track1.wav')]),makeTrack(0,[clip(oldBase,'_Track2-3.wav')])];
+    const video=Array.from({length:6},()=>makeTrack(0));video[5]=makeTrack(0,[clip(oldBase,'_BACKUP.mp4')]);
+    const sequence=makeTimedSequence(audio,video,currentBase);context.app.project.activeSequence=sequence;
+    const listed=JSON.parse(context.exportBackup.getExportSelectionInfo());
+    assert.equal(listed.ok,true,listed.message);
+    assert.deepEqual(listed.items.filter(item=>item.kind==='audio').map(item=>item.trackNumber),[1,2,3]);
+    assert.deepEqual(listed.audioGroups,[[2,3]]);
+    assert.equal(listed.backupInspection.layout.video.targetTrackNumber,6);
+    assert.equal(listed.backupInspection.layout.backupAudio.targetTrackNumber,4);
+});
+
+test('legacy discovery handles encoded filenames and a mix of old and current sequence names', () => {
+    const {context}=loadHostLogic(null,{File:function(filePath){
+        this.fsName=String(filePath);this.name=encodeURIComponent(String(filePath).split(/[\\/]/).pop());
+    }});
+    const oldBase='Old Sequence Name', currentBase='Current Sequence Name';
+    const videoPath='D:/Backups/'+oldBase+'_BACKUP.mp4';
+    const audioPath='D:/Backups/'+oldBase+'_Track2.wav';
+    const currentPath='D:/Backups/'+currentBase+'_Track1.wav';
+    const video=Array.from({length:6},()=>makeTrack(0));
+    video[5]=makeTrack(0,[makeTimedClip(oldBase+'_BACKUP.mp4',60,videoPath)]);
+    const audio=[makeTrack(0),makeTrack(0),makeTrack(0,[makeTimedClip(oldBase+'_BACKUP.mp4',60,videoPath)]),
+        makeTrack(0,[makeTimedClip(currentBase+'_Track1.wav',60,currentPath)]),
+        makeTrack(0,[makeTimedClip(oldBase+'_Track2.wav',60,audioPath)])];
+    const sequence=makeTimedSequence(audio,video,currentBase);
+    context.app.project.activeSequence=sequence;
+    const result=JSON.parse(context.exportBackup.findLegacyBackupForActiveSequence('D:/Backups'));
+    assert.equal(result.found,true,result.message);
+    assert.equal(result.candidate.oldBase,oldBase);
+    assert.equal(result.candidate.files.length,2);
+    assert.equal(result.candidate.layout.video.targetTrackNumber,6);
+    assert.equal(result.candidate.layout.backupAudio.targetTrackNumber,3);
+    assert.equal(result.candidate.layout.audioOutputs[0].targetTrackNumber,5);
 });
 
 test('Align Existing legacy rename requires backup filename rules and matching sequence duration', () => {

@@ -1,5 +1,5 @@
 {
-  "version": "6.1.2",
+  "version": "6.1.3",
   "channel": "main",
-  "notes": "• Includes BACKUP 1080 presets from 13 to 20 Mbps, copied with plugin updates.\n• New installations use BACKUP 1080 16Mbps as the video preset.\n• Your chosen video and audio presets remain selected when reopening the panel and after updates.\n• Reopen the panel or restart Premiere after updating."
+  "notes": "• Align Existing keeps current backup positions first, then uses Empty Track before manual track selection.\n• Video and audio tracks are chosen independently.\n• Renamed sequences correctly detect and rename existing backup files, including mixed old and new filenames.\n• Existing backup audio stays out of the source list, and previous merge groups are restored.\n• Locked backup renames retry every 6 seconds with Cancel available.\n• Empty Track preview works without In/Out marks. Updates show a wait notice and a finished message.\n• Reopen the panel or restart Premiere after updating."
 }

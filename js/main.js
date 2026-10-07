@@ -91,7 +91,7 @@ function getBundledPresetFolderPath() {
 }
 
 function getDefaultVideoPresetPath() {
-    return getBundledPresetPath("1080 AIR.epr");
+    return getBundledPresetPath("BACKUP 1080 16Mbps.epr");
 }
 
 function getDefaultMp3PresetPath() {

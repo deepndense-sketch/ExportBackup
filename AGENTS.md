@@ -1,5 +1,7 @@
 # Release and update rules
 
+- Keep the user-provided export presets in `presets/` tracked in Git and included in release/update packages. When the user supplies changes from `D:\Work\Tools\_Presets`, copy and commit those requested presets with the update. Do not change encoding settings merely to match a filename.
+
 - When committing a plugin update for release, increment its version without waiting for a reminder. Use a patch bump for fixes and small changes, and a minor bump for new features.
 - Keep `version.json`, both extension versions in `CSXS/manifest.xml`, and the displayed release version in sync. Update release notes for the actual changes.
 - Every release must include short, user-friendly notes in `version.json.notes`. These notes are shown automatically in the Premiere update dialog under "What's new"; preserve this behavior and describe only changes actually included in the release.

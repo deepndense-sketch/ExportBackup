@@ -1,5 +1,5 @@
 {
-  "version": "6.1.1",
+  "version": "6.1.2",
   "channel": "main",
-  "notes": "• Project Collector respects unchecked drives, folders, and files when collecting all sequences.\n• A styled confirmation lists the actual source drives and file counts before copying.\n• Clearer source-selection summary when no sequence is selected.\n• Reopen the panel or restart Premiere after updating."
+  "notes": "• Includes BACKUP 1080 presets from 13 to 20 Mbps, copied with plugin updates.\n• New installations use BACKUP 1080 16Mbps as the video preset.\n• Your chosen video and audio presets remain selected when reopening the panel and after updates.\n• Reopen the panel or restart Premiere after updating."
 }
